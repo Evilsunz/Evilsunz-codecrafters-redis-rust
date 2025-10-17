@@ -1,6 +1,7 @@
 use crate::handler::Handler::{Echo, Get, Null, Ping, Set};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
+use resp::{encode, Value};
 
 #[derive(Debug)]
 pub enum Handler {
@@ -46,20 +47,16 @@ impl Handler {
     }
 
     fn handle_set(key: &str, value: &str) -> Vec<u8> {
-        println!(" ++++++ {:?}", key);
-        println!(" ++++++ {:?}", value);
         let mut kv = KV.lock().unwrap();
         kv.insert(key.to_string(), value.to_string());
         crate::encode_string("OK")
     }
 
     fn handle_get(key: &str) -> Vec<u8> {
-        println!(" ++++++ Handle get");
         let kv = KV.lock().unwrap();
-        println!(" ++++++ {:?}", key);
         match kv.get(key) {
             Some(value) => crate::encode_string(value),
-            None => b"$-1\r\n".to_vec(),
+            None => encode(&Value::Null),
         }
     }
 }
