@@ -3,6 +3,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
+use codecrafters_redis::{decode_resp_array, encode_string};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
@@ -24,11 +25,24 @@ fn main() {
         loop {
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
-            if buffer.is_empty() {
-                stream.shutdown(std::net::Shutdown::Both).unwrap();
-                break;
+            println!("Strat ");
+            // stream.write_all(&encode_string("PONG")).unwrap();
+            match decode_resp_array(&buffer) {
+                Some(command) => {
+                    println!("{}", command.get(0).unwrap());
+                    if command.get(0) == Some(&"ECHO".to_string()) {
+                        println!("1");
+                        stream.write_all(&encode_string(command.get(1).unwrap())).unwrap();
+                    } else if command.get(0) == Some(&"PING".to_string()) {
+                        println!("2");
+                        stream.write_all(&encode_string("PONG")).unwrap();
+                    }
+
+                }
+                None => {
+                    stream.write_all(&encode_string("Command not recognized")).unwrap();
+                }
             }
-            stream.write_all(b"+PONG\r\n").unwrap();
         }
     }
 }
