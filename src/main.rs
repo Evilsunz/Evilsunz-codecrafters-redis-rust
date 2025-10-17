@@ -1,9 +1,7 @@
-#![allow(unused_imports)]
-
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
-use codecrafters_redis::{decode_resp_array, encode_string};
+use codecrafters_redis::{decode_resp_array, encode_string, Handler};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
@@ -26,23 +24,10 @@ fn main() {
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
             println!("Strat ");
-            // stream.write_all(&encode_string("PONG")).unwrap();
-            match decode_resp_array(&buffer) {
-                Some(command) => {
-                    println!("{}", command.get(0).unwrap());
-                    if command.get(0) == Some(&"ECHO".to_string()) {
-                        println!("1");
-                        stream.write_all(&encode_string(command.get(1).unwrap())).unwrap();
-                    } else if command.get(0) == Some(&"PING".to_string()) {
-                        println!("2");
-                        stream.write_all(&encode_string("PONG")).unwrap();
-                    }
-
-                }
-                None => {
-                    stream.write_all(&encode_string("Command not recognized")).unwrap();
-                }
-            }
+            let decoded_command = decode_resp_array(&buffer).unwrap();
+            println!("{:?}", decoded_command);
+            let response =Handler::from_command(decoded_command).process_command();
+            stream.write_all(&response).unwrap();
         }
     }
 }

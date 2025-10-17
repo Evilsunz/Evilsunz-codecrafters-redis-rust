@@ -1,6 +1,9 @@
+mod handler;
+
 use anyhow::{Context, Result, bail};
 use std::io::BufReader;
 use resp::{encode, Decoder, Value};
+pub use crate::handler::Handler;
 
 fn value_to_string(value: &Value) -> String {
     match value {
