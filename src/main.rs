@@ -23,7 +23,6 @@ fn main() {
         loop {
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
-            println!("Strat ");
             let decoded_command = decode_resp_array(&buffer).unwrap();
             println!("{:?}", decoded_command);
             let response =Handler::from_command(decoded_command).process_command();
