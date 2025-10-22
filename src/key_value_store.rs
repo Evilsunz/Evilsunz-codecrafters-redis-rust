@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 use resp::{encode, Value};
@@ -31,24 +32,35 @@ impl KeyValueStore {
         crate::encode_int(&internal_list.len())
     }
 
-    pub fn list_range(&self, list_name: String, start : usize, end : usize) -> Vec<u8> {
+    pub fn list_range(&self, list_name: String,mut start : isize, mut end: isize) -> Vec<u8> {
+        println!(" ++++++++ start {}", start);
+        println!(" ++++++++ end {}", end);
         let mut lists = self.lists.lock().unwrap();
         let inner_list = match lists.get(&list_name) {
             Some(inner_list) => inner_list,
             None => return encode_vec(vec!()),
         };
-        if start > end || start >= inner_list.len() {
-            return encode_vec(vec![]);
+        fn normalize_index(index: isize, len: usize) -> isize {
+            if index < 0 {
+                len as isize + index
+            } else {
+                index
+            }
         }
 
-        let effective_end = end.min(inner_list.len() - 1);
-        encode_vec(inner_list[start..=effective_end].to_vec())
-        // If the start index is greater than or equal to the list's length, an empty array is returned.
-        // If the stop index is greater than or equal to the list's length, the stop index is treated as the last element.
-        // If the start index is greater than the stop index, an empty array is returned.
+        let list_len = inner_list.len();
+        let end = normalize_index(end, list_len);
+        let start = normalize_index(start, list_len);
+
+        if start > end || start >= list_len.try_into().unwrap() {
+            return encode_vec(vec![]);
+        }
         
-        // println!("+++++++ {:?}", inner_list);
-        // crate::encode_vec(inner_list[start..=end].to_vec())
+        let effective_end = end.min((inner_list.len() as isize) - 1);
+        // Convert isize to usize after ensuring non-negative values
+        let start_idx = start.max(0) as usize;
+        let end_idx = effective_end.max(0) as usize;
+        encode_vec(inner_list[start_idx..=end_idx].to_vec())
     }
     
     pub fn set(&self, key: String, value: String, expire_unit: Option<String>, expire_dur: Option<u128>) -> Vec<u8> {

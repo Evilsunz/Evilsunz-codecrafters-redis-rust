@@ -9,7 +9,7 @@ pub enum Handler {
     Set(String, String, Option<String>, Option<u128>),
     Get(String),
     RPush(String, Vec<String>),
-    LRange(String, usize, usize),
+    LRange(String, isize, isize),
     Null,
 }
 
@@ -36,8 +36,8 @@ impl Handler {
             },
             Some(LRANGE) => {
                 let (list_name, values) = Self::parse_all_list_args(&vector);
-                let start = values.get(0).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
-                let end = values.get(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+                let start = values.get(0).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
+                let end = values.get(1).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
                 LRange(list_name, start, end)
             },
             _ => Null,
