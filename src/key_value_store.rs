@@ -25,10 +25,9 @@ impl KeyValueStore {
     }
 
     pub fn add_to_list(&self, list_name: String, mut values: Vec<String>) -> Vec<u8> {
-        println!("+++++++ adding to list {:?}", values);
         let mut lists = self.lists.lock().unwrap();
-        lists.entry(list_name).and_modify(|v| v.append(&mut values)).or_insert(values);
-        crate::encode_int(&lists.len())
+        let internal_list =lists.entry(list_name).and_modify(|v| v.append(&mut values)).or_insert(values);
+        crate::encode_int(&internal_list.len())
     }
 
     pub fn set(&self, key: String, value: String, expire_unit: Option<String>, expire_dur: Option<u128>) -> Vec<u8> {
