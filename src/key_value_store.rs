@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 use resp::{encode, Value};
+use crate::encode_vec;
 
 pub static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::new());
 
@@ -30,6 +31,15 @@ impl KeyValueStore {
         crate::encode_int(&internal_list.len())
     }
 
+    pub fn list_range(&self, list_name: String, start : usize, end : usize) -> Vec<u8> {
+        let mut lists = self.lists.lock().unwrap();
+        let inner_list = match lists.get(&list_name) {
+            Some(inner_list) => inner_list,
+            None => return encode_vec(vec!()),
+        };
+        crate::encode_vec(inner_list[start..end].to_vec())
+    }
+    
     pub fn set(&self, key: String, value: String, expire_unit: Option<String>, expire_dur: Option<u128>) -> Vec<u8> {
         if let (Some(unit), Some(duration)) = (expire_unit, expire_dur) {
             match self.calculate_expiration_time(&unit, duration) {

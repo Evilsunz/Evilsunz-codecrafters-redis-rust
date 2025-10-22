@@ -41,3 +41,8 @@ pub fn encode_int(i: &usize) -> Vec<u8> {
     let val = Value::Integer(*i as i64);
     encode(&val)
 }
+
+pub fn encode_vec(v: Vec<String>) -> Vec<u8> {
+    let val = Value::Array(v.into_iter().map(Value::String).collect());
+    encode(&val)
+}
