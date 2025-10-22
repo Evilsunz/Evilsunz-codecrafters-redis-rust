@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 use resp::{encode, Value};
-use crate::encode_vec;
+use crate::{encode_int, encode_vec};
 
 pub static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::new());
 
@@ -26,6 +26,15 @@ impl KeyValueStore {
         }
     }
 
+    pub fn len(&self, list_name: String) -> Vec<u8> {
+        let lists = self.lists.lock().unwrap();
+        let inner_list = match lists.get(&list_name) {
+            Some(inner_list) => inner_list,
+            None => return encode_int(&0),
+        };
+        crate::encode_int(&inner_list.len())
+    }
+
     pub fn add_to_list(&self, list_name: String, mut values: Vec<String>) -> Vec<u8> {
         let mut lists = self.lists.lock().unwrap();
         let internal_list =lists.entry(list_name).and_modify(|v| v.append(&mut values)).or_insert(values);
@@ -35,14 +44,12 @@ impl KeyValueStore {
     pub fn add_to_list_left(&self, list_name: String, mut values: Vec<String>) -> Vec<u8> {
         let mut lists = self.lists.lock().unwrap();
         values.reverse();
-        println!("{:?}", values);
         let internal_list =lists
             .entry(list_name)
             .and_modify(|v| {
                 v.splice(0..0, values.iter().cloned());
             })
             .or_insert(values);
-        println!("{:?}", internal_list);
         crate::encode_int(&internal_list.len())
     }
 
