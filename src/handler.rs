@@ -35,9 +35,10 @@ impl Handler {
                 RPush(list_name, values)
             },
             Some(LRANGE) => {
-                println!("+++++++ {:?}", vector);
                 let (list_name, values) = Self::parse_all_list_args(&vector);
-                LRange(list_name, 0,2)
+                let start = values.get(0).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+                let end = values.get(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+                LRange(list_name, start, end)
             },
             _ => Null,
         }

@@ -26,8 +26,7 @@ fn main() {
             let decoded_command = decode_resp_array(&buffer).unwrap_or_else(|| {
                 panic!("Failed to decode command {}", String::from_utf8_lossy(&buffer));
             });
-            println!("decoded command: {:?}", decoded_command);
-            //println!("Decoded +++++ {:?}", decoded_command);
+            println!("Decoded +++++ {:?}", decoded_command);
             let response =Handler::from_command(decoded_command).process_command();
             stream.write_all(&response).unwrap();
         }

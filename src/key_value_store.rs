@@ -37,7 +37,18 @@ impl KeyValueStore {
             Some(inner_list) => inner_list,
             None => return encode_vec(vec!()),
         };
-        crate::encode_vec(inner_list[start..end].to_vec())
+        if start > end || start >= inner_list.len() {
+            return encode_vec(vec![]);
+        }
+
+        let effective_end = end.min(inner_list.len() - 1);
+        encode_vec(inner_list[start..=effective_end].to_vec())
+        // If the start index is greater than or equal to the list's length, an empty array is returned.
+        // If the stop index is greater than or equal to the list's length, the stop index is treated as the last element.
+        // If the start index is greater than the stop index, an empty array is returned.
+        
+        // println!("+++++++ {:?}", inner_list);
+        // crate::encode_vec(inner_list[start..=end].to_vec())
     }
     
     pub fn set(&self, key: String, value: String, expire_unit: Option<String>, expire_dur: Option<u128>) -> Vec<u8> {
