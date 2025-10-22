@@ -32,35 +32,32 @@ impl KeyValueStore {
         crate::encode_int(&internal_list.len())
     }
 
-    pub fn list_range(&self, list_name: String,mut start : isize, mut end: isize) -> Vec<u8> {
-        println!(" ++++++++ start {}", start);
-        println!(" ++++++++ end {}", end);
+    pub fn add_to_list_left(&self, list_name: String, mut values: Vec<String>) -> Vec<u8> {
         let mut lists = self.lists.lock().unwrap();
+        values.reverse();
+        println!("{:?}", values);
+        let internal_list =lists
+            .entry(list_name)
+            .and_modify(|v| {
+                v.splice(0..0, values.iter().cloned());
+            })
+            .or_insert(values);
+        println!("{:?}", internal_list);
+        crate::encode_int(&internal_list.len())
+    }
+
+    pub fn list_range(&self, list_name: String, start: isize, end: isize) -> Vec<u8> {
+        let lists = self.lists.lock().unwrap();
         let inner_list = match lists.get(&list_name) {
             Some(inner_list) => inner_list,
-            None => return encode_vec(vec!()),
+            None => return encode_vec(vec![]),
         };
-        fn normalize_index(index: isize, len: usize) -> isize {
-            if index < 0 {
-                len as isize + index
-            } else {
-                index
-            }
-        }
 
-        let list_len = inner_list.len();
-        let end = normalize_index(end, list_len);
-        let start = normalize_index(start, list_len);
-
-        if start > end || start >= list_len.try_into().unwrap() {
-            return encode_vec(vec![]);
+        let slice_indices = self.calculate_slice_indices(start, end, inner_list.len());
+        match slice_indices {
+            Some((start_idx, end_idx)) => encode_vec(inner_list[start_idx..=end_idx].to_vec()),
+            None => encode_vec(vec![]),
         }
-        
-        let effective_end = end.min((inner_list.len() as isize) - 1);
-        // Convert isize to usize after ensuring non-negative values
-        let start_idx = start.max(0) as usize;
-        let end_idx = effective_end.max(0) as usize;
-        encode_vec(inner_list[start_idx..=end_idx].to_vec())
     }
     
     pub fn set(&self, key: String, value: String, expire_unit: Option<String>, expire_dur: Option<u128>) -> Vec<u8> {
@@ -120,4 +117,26 @@ impl KeyValueStore {
         expiration_timestamp < current_timestamp
     }
 
+    fn calculate_slice_indices(&self, start: isize, end: isize, list_len: usize) -> Option<(usize, usize)> {
+        let normalized_start = self.normalize_index(start, list_len);
+        let normalized_end = self.normalize_index(end, list_len);
+
+        if normalized_start > normalized_end || normalized_start >= list_len as isize {
+            return None;
+        }
+
+        let start_idx = normalized_start.max(0) as usize;
+        let end_idx = normalized_end.min((list_len as isize) - 1).max(0) as usize;
+
+        Some((start_idx, end_idx))
+    }
+
+    fn normalize_index(&self, index: isize, len: usize) -> isize {
+        if index < 0 {
+            len as isize + index
+        } else {
+            index
+        }
+    }
+    
 }

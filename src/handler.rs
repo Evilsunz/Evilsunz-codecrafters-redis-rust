@@ -1,5 +1,4 @@
-use crate::handler::Handler::{Echo, Get, Null, Ping, Set};
-use crate::Handler::{LRange, RPush};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set};
 use crate::key_value_store::KV_STORE;
 
 #[derive(Debug)]
@@ -9,6 +8,7 @@ pub enum Handler {
     Set(String, String, Option<String>, Option<u128>),
     Get(String),
     RPush(String, Vec<String>),
+    LPush(String, Vec<String>),
     LRange(String, isize, isize),
     Null,
 }
@@ -19,6 +19,7 @@ const ECHO: &str = "ECHO";
 const GET: &str = "GET";
 const SET: &str = "SET";
 const RPUSH: &str = "RPUSH";
+const LPUSH: &str = "LPUSH";
 const LRANGE: &str = "LRANGE";
 
 impl Handler {
@@ -33,6 +34,10 @@ impl Handler {
             Some(RPUSH) => {
                 let (list_name, values) = Self::parse_all_list_args(&vector);
                 RPush(list_name, values)
+            },
+            Some(LPUSH) => {
+                let (list_name, values) = Self::parse_all_list_args(&vector);
+                LPush(list_name, values)
             },
             Some(LRANGE) => {
                 let (list_name, values) = Self::parse_all_list_args(&vector);
@@ -53,6 +58,7 @@ impl Handler {
             }
             Get(key) => KV_STORE.get(key),
             RPush(list_name, values) => KV_STORE.add_to_list(list_name.clone(), values.clone()),
+            LPush(list_name, values) => KV_STORE.add_to_list_left(list_name.clone(), values.clone()),
             LRange(list_name, start, end) => KV_STORE.list_range(list_name.clone(), *start, *end),
             Null => crate::encode_string("Command not recognized"),
         }
