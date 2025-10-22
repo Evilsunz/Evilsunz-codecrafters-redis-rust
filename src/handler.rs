@@ -1,4 +1,4 @@
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop};
 use crate::key_value_store::KV_STORE;
 
 #[derive(Debug)]
@@ -11,6 +11,7 @@ pub enum Handler {
     LPush(String, Vec<String>),
     LRange(String, isize, isize),
     LLen(String),
+    LPop(String),
     Null,
 }
 
@@ -23,6 +24,7 @@ const RPUSH: &str = "RPUSH";
 const LPUSH: &str = "LPUSH";
 const LRANGE: &str = "LRANGE";
 const LLEN: &str = "LLEN";
+const LPOP: &str = "LPOP";
 
 impl Handler {
     pub fn from_command(vector: Vec<String>) -> Handler {
@@ -31,6 +33,7 @@ impl Handler {
             Some(ECHO) => Self::parse_single_arg(&vector).map(Echo).unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
             Some(LLEN) => Self::parse_single_arg(&vector).map(LLen).unwrap_or(Null),
+            Some(LPOP) => Self::parse_single_arg(&vector).map(LPop).unwrap_or(Null),
             Some(SET) => Self::parse_four_args(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
                 .unwrap_or(Null),
@@ -64,6 +67,7 @@ impl Handler {
             LPush(list_name, values) => KV_STORE.add_to_list_left(list_name.clone(), values.clone()),
             LRange(list_name, start, end) => KV_STORE.list_range(list_name.clone(), *start, *end),
             LLen(list_name) => KV_STORE.len(list_name.clone()),
+            LPop(list_name) => KV_STORE.pop_first(list_name.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
     }

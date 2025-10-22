@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 use resp::{encode, Value};
-use crate::{encode_int, encode_vec};
+use crate::{encode_int, encode_null, encode_vec};
 
 pub static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::new());
 
@@ -24,6 +24,19 @@ impl KeyValueStore {
             expire: Mutex::new(HashMap::new()),
             lists: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub fn pop_first(&self, list_name: String) -> Vec<u8> {
+        let mut lists = self.lists.lock().unwrap();
+        let inner_list: &mut Vec<String> = match lists.get_mut(&list_name) {
+            Some(inner_list) => inner_list,
+            None => return encode_null(),
+        };
+        if inner_list.is_empty() {
+            return encode_null()
+        }
+        let first_value = inner_list.remove(0);
+        crate::encode_string(&first_value)
     }
 
     pub fn len(&self, list_name: String) -> Vec<u8> {

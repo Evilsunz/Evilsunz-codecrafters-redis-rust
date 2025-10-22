@@ -32,6 +32,10 @@ pub fn decode_resp_array(buf: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+pub fn encode_null() -> Vec<u8> {
+    encode(&Value::Null)
+}
+
 pub fn encode_string(s: &str) -> Vec<u8> {
     let val = Value::String(String::from(s));
     encode(&val)
