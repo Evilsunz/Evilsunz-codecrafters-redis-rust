@@ -1,8 +1,6 @@
 use crate::handler::Handler::{Echo, Get, Null, Ping, Set};
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
-use std::time::SystemTime;
-use resp::{encode, Value};
+use crate::Handler::RPush;
+use crate::key_value_store::KV_STORE;
 
 #[derive(Debug)]
 pub enum Handler {
@@ -10,76 +8,16 @@ pub enum Handler {
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
     Get(String),
+    RPush(String, Vec<String>),
     Null,
 }
 
-struct KeyValueStore {
-    store: Mutex<HashMap<String, String>>,
-    expire: Mutex<HashMap<String, u128>>,
-}
-
-impl KeyValueStore {
-    fn new() -> Self {
-        Self {
-            store: Mutex::new(HashMap::new()),
-            expire: Mutex::new(HashMap::new()),
-        }
-    }
-
-    fn set(&self, key: String, value: String, expire_unit: Option<String>, expire_dur : Option<u128>) -> Vec<u8> {
-        if expire_unit.is_some() && expire_dur.is_some() {
-            let mut expire_in_millis;
-            if expire_unit.clone().unwrap() == "EX" {
-                expire_in_millis = expire_dur.unwrap() * 1000;
-            } else if expire_unit.clone().unwrap() == "PX" {
-                expire_in_millis = expire_dur.unwrap();
-            } else {
-                panic!("Invalid expire unit : {}",expire_unit.unwrap());
-            }
-            let expire_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() + expire_in_millis;
-            let mut expire = self.expire.lock().unwrap();
-            expire.insert(key.clone(), expire_time);
-        }
-        let mut store = self.store.lock().unwrap();
-        store.insert(key, value);
-        crate::encode_string("OK")
-    }
-
-    fn get(&self, key: &str) -> Vec<u8> {
-        let mut expire = self.expire.lock().unwrap();
-        let mut store = self.store.lock().unwrap();
-        if let Some(&stored_expiration) = expire.get(key) {
-            println!("stored_expiration: {}",stored_expiration);
-            println!("current_timestamp: {}",SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis());
-            if self.is_expired(stored_expiration) {
-                expire.remove(key);
-                store.remove(key);
-                return encode(&Value::Null);
-            }
-        }
-        println!("Returning get key: {}",key);
-        match store.get(key) {
-            Some(value) => crate::encode_string(value),
-            None => encode(&Value::Null),
-        }
-    }
-
-    fn is_expired(&self, expiration_timestamp: u128) -> bool {
-        let current_timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        expiration_timestamp < current_timestamp
-    }
-
-}
-
-static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::new());
 
 const PING: &str = "PING";
 const ECHO: &str = "ECHO";
 const GET: &str = "GET";
 const SET: &str = "SET";
+const RPUSH: &str = "RPUSH";
 
 impl Handler {
     pub fn from_command(vector: Vec<String>) -> Handler {
@@ -90,6 +28,11 @@ impl Handler {
             Some(SET) => Self::parse_four_args(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
                 .unwrap_or(Null),
+            Some(RPUSH) => {
+                println!("+++++++ {:?}", vector);
+                let (list_name, values) = Self::parse_all_list_args(&vector);
+                RPush(list_name, values)
+            },
             _ => Null,
         }
     }
@@ -102,7 +45,8 @@ impl Handler {
                 KV_STORE.set(key.clone(), value.clone(), expire.clone() , expire_unit.clone())
             }
             Get(key) => KV_STORE.get(key),
-            Null => b"Command not recognized\r\n".to_vec(),
+            RPush(list_name, values) => KV_STORE.add_to_list(list_name.clone(), values.clone()),
+            Null => crate::encode_string("Command not recognized"),
         }
     }
 
@@ -122,4 +66,11 @@ impl Handler {
             vector.get(4).and_then(|s| s.parse().ok())
         ))
     }
+
+    fn parse_all_list_args(vector: &[String]) -> (String, Vec<String>) {
+        let list_name = vector.get(1).cloned().unwrap_or_default();
+        let values = vector.iter().skip(2).cloned().collect::<Vec<String>>();
+        (list_name, values)
+    }
+
 }

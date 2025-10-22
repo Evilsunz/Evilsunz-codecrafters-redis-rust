@@ -1,4 +1,5 @@
 mod handler;
+mod key_value_store;
 
 use anyhow::{Context, Result, bail};
 use std::io::BufReader;
@@ -33,5 +34,10 @@ pub fn decode_resp_array(buf: &[u8]) -> Option<Vec<String>> {
 
 pub fn encode_string(s: &str) -> Vec<u8> {
     let val = Value::String(String::from(s));
+    encode(&val)
+}
+
+pub fn encode_int(i: &usize) -> Vec<u8> {
+    let val = Value::Integer(*i as i64);
     encode(&val)
 }
