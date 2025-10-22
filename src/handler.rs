@@ -11,7 +11,7 @@ pub enum Handler {
     LPush(String, Vec<String>),
     LRange(String, isize, isize),
     LLen(String),
-    LPop(String),
+    LPop(String, Option<u64>),
     Null,
 }
 
@@ -33,7 +33,6 @@ impl Handler {
             Some(ECHO) => Self::parse_single_arg(&vector).map(Echo).unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
             Some(LLEN) => Self::parse_single_arg(&vector).map(LLen).unwrap_or(Null),
-            Some(LPOP) => Self::parse_single_arg(&vector).map(LPop).unwrap_or(Null),
             Some(SET) => Self::parse_four_args(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
                 .unwrap_or(Null),
@@ -44,6 +43,12 @@ impl Handler {
             Some(LPUSH) => {
                 let (list_name, values) = Self::parse_all_list_args(&vector);
                 LPush(list_name, values)
+            },
+            Some(LPOP) => {
+                let (list_name, values) = Self::parse_all_list_args(&vector);
+                let start = values.get(0).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
+                let count = if start > 0 { Some(start as u64) } else { None };
+                LPop(list_name, count)
             },
             Some(LRANGE) => {
                 let (list_name, values) = Self::parse_all_list_args(&vector);
@@ -67,7 +72,7 @@ impl Handler {
             LPush(list_name, values) => KV_STORE.add_to_list_left(list_name.clone(), values.clone()),
             LRange(list_name, start, end) => KV_STORE.list_range(list_name.clone(), *start, *end),
             LLen(list_name) => KV_STORE.len(list_name.clone()),
-            LPop(list_name) => KV_STORE.pop_first(list_name.clone()),
+            LPop(list_name,elem_number) => KV_STORE.pop_first(list_name.clone(),elem_number.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
     }

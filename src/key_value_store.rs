@@ -26,17 +26,26 @@ impl KeyValueStore {
         }
     }
 
-    pub fn pop_first(&self, list_name: String) -> Vec<u8> {
+    pub fn pop_first(&self, list_name: String, count: Option<u64>) -> Vec<u8> {
         let mut lists = self.lists.lock().unwrap();
-        let inner_list: &mut Vec<String> = match lists.get_mut(&list_name) {
-            Some(inner_list) => inner_list,
+        let inner_list = match lists.get_mut(&list_name) {
+            Some(list) => list,
             None => return encode_null(),
         };
         if inner_list.is_empty() {
-            return encode_null()
+            return encode_null();
+        }
+        if let Some(count) = count {
+            return self.pop_multiple_elements(inner_list, count);
         }
         let first_value = inner_list.remove(0);
         crate::encode_string(&first_value)
+    }
+
+    fn pop_multiple_elements(&self, list: &mut Vec<String>, count: u64) -> Vec<u8> {
+        let count_usize = count.try_into().unwrap_or(0);
+        let items = list.drain(0..count_usize).collect::<Vec<String>>();
+        crate::encode_vec(items)
     }
 
     pub fn len(&self, list_name: String) -> Vec<u8> {
