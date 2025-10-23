@@ -54,8 +54,10 @@ impl Handler {
             },
             Some(BLPOP) => {
                 let (list_name, values) = Self::parse_all_list_args(&vector);
-                let start = values.get(0).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
-                let count = if start > 0 { Some(start as u64) } else { None };
+                println!("BLPOP: {:?}", values.get(0));
+                let start = values.get(0).and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
+                println!("BLPOP: {:?}", start * 1000.0);
+                let count = if start > 0.0 { Some((start * 1000.0) as u64) } else { None };
                 BLPop(list_name, count)
             },
             Some(LRANGE) => {
@@ -80,7 +82,7 @@ impl Handler {
             LPush(list_name, values) => KV_STORE.add_to_list_left(list_name.clone(), values.clone()),
             LRange(list_name, start, end) => KV_STORE.list_range(list_name.clone(), *start, *end),
             LLen(list_name) => KV_STORE.len(list_name.clone()),
-            LPop(list_name,elem_number) => KV_STORE.pop_first(list_name.clone(),elem_number.clone()),
+            LPop(list_name,elem_number) => KV_STORE.pop_first_no_wait(list_name.clone(),elem_number.clone()),
             BLPop(list_name,elem_number) => KV_STORE.pop_first_or_wait(list_name.clone(),elem_number.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
