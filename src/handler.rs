@@ -1,4 +1,4 @@
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop};
 use crate::key_value_store::KV_STORE;
 
 #[derive(Debug)]
@@ -12,6 +12,7 @@ pub enum Handler {
     LRange(String, isize, isize),
     LLen(String),
     LPop(String, Option<u64>),
+    BLPop(String, Option<u64>),
     Null,
 }
 
@@ -25,6 +26,7 @@ const LPUSH: &str = "LPUSH";
 const LRANGE: &str = "LRANGE";
 const LLEN: &str = "LLEN";
 const LPOP: &str = "LPOP";
+const BLPOP: &str = "BLPOP";
 
 impl Handler {
     pub fn from_command(vector: Vec<String>) -> Handler {
@@ -50,6 +52,12 @@ impl Handler {
                 let count = if start > 0 { Some(start as u64) } else { None };
                 LPop(list_name, count)
             },
+            Some(BLPOP) => {
+                let (list_name, values) = Self::parse_all_list_args(&vector);
+                let start = values.get(0).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
+                let count = if start > 0 { Some(start as u64) } else { None };
+                BLPop(list_name, count)
+            },
             Some(LRANGE) => {
                 let (list_name, values) = Self::parse_all_list_args(&vector);
                 let start = values.get(0).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
@@ -73,6 +81,7 @@ impl Handler {
             LRange(list_name, start, end) => KV_STORE.list_range(list_name.clone(), *start, *end),
             LLen(list_name) => KV_STORE.len(list_name.clone()),
             LPop(list_name,elem_number) => KV_STORE.pop_first(list_name.clone(),elem_number.clone()),
+            BLPop(list_name,elem_number) => KV_STORE.pop_first_or_wait(list_name.clone(),elem_number.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
     }

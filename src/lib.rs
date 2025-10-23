@@ -32,21 +32,66 @@ pub fn decode_resp_array(buf: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+pub fn encode_value<T: Into<Value>>(value: T) -> Vec<u8> {
+    encode(&value.into())
+}
+
+// Helper wrapper types for conversions
+pub struct RespNull;
+pub struct RespInt(pub usize);
+pub struct RespArray(pub Vec<String>);
+pub struct RespString(pub String);
+
+
+impl Into<Value> for RespNull {
+    fn into(self) -> Value {
+        Value::Null
+    }
+}
+
+// impl From<&str> for RespString {
+//     fn from(s: &str) -> Self {
+//         RespString(String::from(s))
+//     }
+// }
+// 
+// impl From<String> for RespString {
+//     fn from(s: String) -> Self {
+//         RespString(s)
+//     }
+// }
+
+impl Into<Value> for RespString {
+    fn into(self) -> Value {
+        Value::String(self.0)
+    }
+}
+
+impl Into<Value> for RespInt {
+    fn into(self) -> Value {
+        Value::Integer(self.0 as i64)
+    }
+}
+
+impl Into<Value> for RespArray {
+    fn into(self) -> Value {
+        Value::Array(self.0.into_iter().map(Value::String).collect())
+    }
+}
+
+// Convenience functions for backward compatibility
 pub fn encode_null() -> Vec<u8> {
-    encode(&Value::Null)
+    encode_value(RespNull)
 }
 
 pub fn encode_string(s: &str) -> Vec<u8> {
-    let val = Value::String(String::from(s));
-    encode(&val)
+    encode_value(RespString(String::from(s)))
 }
 
 pub fn encode_int(i: &usize) -> Vec<u8> {
-    let val = Value::Integer(*i as i64);
-    encode(&val)
+    encode_value(RespInt(*i))
 }
 
 pub fn encode_vec(v: Vec<String>) -> Vec<u8> {
-    let val = Value::Array(v.into_iter().map(Value::String).collect());
-    encode(&val)
+    encode_value(RespArray(v))
 }
