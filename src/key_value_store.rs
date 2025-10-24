@@ -194,12 +194,11 @@ impl KeyValueStore {
         Ok(current_time + expire_in_millis)
     }
 
-    pub fn type_of(&self, key: &str) -> Vec<u8> {
+    pub fn type_of(&self, key: &str) -> Option<String> {
         let mut store = self.store.lock().unwrap();
         match store.get(key) {
-            //Some(value) => crate::encode_string(type_of(value)),
-            Some(value) => crate::encode_string("string"),
-            None => encode_string(NONE),
+            Some(value) => Some("string".to_string()),
+            None => None,
         }
     }
 

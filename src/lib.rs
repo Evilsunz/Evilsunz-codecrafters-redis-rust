@@ -1,5 +1,6 @@
 mod handler;
 mod key_value_store;
+mod stream_store;
 
 use std::any::type_name;
 use anyhow::{Context, Result, bail};

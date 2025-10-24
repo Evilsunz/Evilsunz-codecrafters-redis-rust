@@ -1,11 +1,14 @@
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type};
+use crate::encode_string;
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd};
 use crate::key_value_store::KV_STORE;
+use crate::stream_store::STREAM_STORE;
 
 #[derive(Debug)]
 pub enum Handler {
     Ping,
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
+    XAdd(String, String, Vec<String>),
     Get(String),
     RPush(String, Vec<String>),
     LPush(String, Vec<String>),
@@ -29,6 +32,7 @@ const LLEN: &str = "LLEN";
 const LPOP: &str = "LPOP";
 const BLPOP: &str = "BLPOP";
 const TYPE: &str = "TYPE";
+const XADD: &str = "XADD";
 
 impl Handler {
     pub fn from_command(vector: Vec<String>) -> Handler {
@@ -41,22 +45,26 @@ impl Handler {
             Some(SET) => Self::parse_four_args(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
                 .unwrap_or(Null),
+            Some(XADD) => {
+                let (list_name, id, values) = Self::parse_two_and_list_args(&vector);
+                XAdd(list_name, id, values)
+            },
             Some(RPUSH) => {
-                let (list_name, values) = Self::parse_all_list_args(&vector);
+                let (list_name, values) = Self::parse_one_and_list_args(&vector);
                 RPush(list_name, values)
             },
             Some(LPUSH) => {
-                let (list_name, values) = Self::parse_all_list_args(&vector);
+                let (list_name, values) = Self::parse_one_and_list_args(&vector);
                 LPush(list_name, values)
             },
             Some(LPOP) => {
-                let (list_name, values) = Self::parse_all_list_args(&vector);
+                let (list_name, values) = Self::parse_one_and_list_args(&vector);
                 let start = values.get(0).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
                 let count = if start > 0 { Some(start as u64) } else { None };
                 LPop(list_name, count)
             },
             Some(BLPOP) => {
-                let (list_name, values) = Self::parse_all_list_args(&vector);
+                let (list_name, values) = Self::parse_one_and_list_args(&vector);
                 println!("BLPOP: {:?}", values.get(0));
                 let start = values.get(0).and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
                 println!("BLPOP: {:?}", start * 1000.0);
@@ -64,7 +72,7 @@ impl Handler {
                 BLPop(list_name, count)
             },
             Some(LRANGE) => {
-                let (list_name, values) = Self::parse_all_list_args(&vector);
+                let (list_name, values) = Self::parse_one_and_list_args(&vector);
                 let start = values.get(0).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
                 let end = values.get(1).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
                 LRange(list_name, start, end)
@@ -81,13 +89,19 @@ impl Handler {
                 KV_STORE.set(key.clone(), value.clone(), expire.clone() , expire_unit.clone())
             }
             Get(key) => KV_STORE.get(key),
-            Type(key) => KV_STORE.type_of(key),
+            Type(key) => {
+                KV_STORE.type_of(key)
+                    .or_else(|| STREAM_STORE.type_of(key))
+                    .map(|type_of| encode_string(type_of.as_str()))
+                    .unwrap_or_else(|| encode_string("none"))
+            },
             RPush(list_name, values) => KV_STORE.add_to_list(list_name.clone(), values.clone()),
             LPush(list_name, values) => KV_STORE.add_to_list_left(list_name.clone(), values.clone()),
             LRange(list_name, start, end) => KV_STORE.list_range(list_name.clone(), *start, *end),
             LLen(list_name) => KV_STORE.len(list_name.clone()),
             LPop(list_name,elem_number) => KV_STORE.pop_first_no_wait(list_name.clone(),elem_number.clone()),
             BLPop(list_name,elem_number) => KV_STORE.pop_first_or_wait(list_name.clone(),elem_number.clone()),
+            XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id.clone(),vec.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
     }
@@ -109,10 +123,17 @@ impl Handler {
         ))
     }
 
-    fn parse_all_list_args(vector: &[String]) -> (String, Vec<String>) {
+    fn parse_one_and_list_args(vector: &[String]) -> (String, Vec<String>) {
         let list_name = vector.get(1).cloned().unwrap_or_default();
         let values = vector.iter().skip(2).cloned().collect::<Vec<String>>();
         (list_name, values)
     }
 
+    fn parse_two_and_list_args(vector: &[String]) -> (String,String ,Vec<String>) {
+        let list_name = vector.get(1).cloned().unwrap_or_default();
+        let id = vector.get(2).cloned().unwrap_or_default();
+        let values = vector.iter().skip(3).cloned().collect::<Vec<String>>();
+        (list_name, id, values)
+    }
+    
 }
