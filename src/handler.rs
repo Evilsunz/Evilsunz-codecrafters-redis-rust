@@ -101,7 +101,7 @@ impl Handler {
             LLen(list_name) => KV_STORE.len(list_name.clone()),
             LPop(list_name,elem_number) => KV_STORE.pop_first_no_wait(list_name.clone(),elem_number.clone()),
             BLPop(list_name,elem_number) => KV_STORE.pop_first_or_wait(list_name.clone(),elem_number.clone()),
-            XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id.clone(),vec.clone()),
+            XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id,vec.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
     }
