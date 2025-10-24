@@ -22,20 +22,38 @@ impl StreamStore {
         }
     }
 
-    pub fn add_stream(&self, stream_key: String, id: String, vec: Vec<String>) -> Vec<u8> {
+    pub fn add_stream(&self, stream_key: String, id: &str, vec: Vec<String>) -> Vec<u8> {
         let mut store = self.store.lock().unwrap();
-        if let Some(last_stream_id) = store.get(stream_key.as_str()).map(|map| map.last().map(|(id, _)| id)) {
-            let new_stream_id = StreamId::new(id.clone());
-            if let Err(e) = Self::check_id(*last_stream_id.unwrap(), new_stream_id) {
-                return encode_error(e);
+
+        let new_stream_id = match self.validate_new_stream_id(&store, &stream_key, id) {
+            Ok(stream_id) => stream_id,
+            Err(error_response) => return error_response,
+        };
+
+        let stream = Stream::from_vec(vec);
+        let index_map = store.entry(stream_key).or_insert_with(IndexMap::new);
+        index_map.insert(new_stream_id, stream);
+
+        encode_string(id)
+    }
+
+    fn validate_new_stream_id(
+        &self,
+        store: &HashMap<String, IndexMap<StreamId, Stream>>,
+        stream_key: &str,
+        id: &str,
+    ) -> Result<StreamId, Vec<u8>> {
+        let new_stream_id = StreamId::new(id.to_string());
+
+        if let Some(stream_map) = store.get(stream_key) {
+            if let Some((last_stream_id, _)) = stream_map.last() {
+                if let Err(e) = Self::check_id(*last_stream_id, new_stream_id) {
+                    return Err(encode_error(e));
+                }
             }
         }
-        let new_stream_id = StreamId::new(id.clone());
-        let stream = Stream::from_vec(vec);
-        let mut index_map = store.entry(stream_key).or_insert_with(IndexMap::new);
-        index_map.insert(new_stream_id, stream);
-        println!("{:?}", store);
-        encode_string(id.as_str())
+
+        Ok(new_stream_id)
     }
 
     fn check_id(latest_stream: StreamId, new_stream: StreamId) -> Result<(), &'static str> {
