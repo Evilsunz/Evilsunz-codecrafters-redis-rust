@@ -1,6 +1,7 @@
 mod handler;
 mod key_value_store;
 
+use std::any::type_name;
 use anyhow::{Context, Result, bail};
 use std::io::BufReader;
 use resp::{encode, Decoder, Value};
@@ -49,18 +50,6 @@ impl Into<Value> for RespNull {
     }
 }
 
-// impl From<&str> for RespString {
-//     fn from(s: &str) -> Self {
-//         RespString(String::from(s))
-//     }
-// }
-// 
-// impl From<String> for RespString {
-//     fn from(s: String) -> Self {
-//         RespString(s)
-//     }
-// }
-
 impl Into<Value> for RespString {
     fn into(self) -> Value {
         Value::String(self.0)
@@ -94,4 +83,8 @@ pub fn encode_int(i: &usize) -> Vec<u8> {
 
 pub fn encode_vec(v: Vec<String>) -> Vec<u8> {
     encode_value(RespArray(v))
+}
+
+fn type_of<T>(_: T) -> &'static str {
+    type_name::<T>()
 }

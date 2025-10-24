@@ -1,7 +1,4 @@
-use crate::{
-    encode_int, encode_null, encode_string, encode_value, encode_vec, RespArray, RespNull,
-    RespString,
-};
+use crate::{encode_int, encode_null, encode_string, encode_value, encode_vec, type_of, RespArray, RespNull, RespString};
 use resp::{encode, Value};
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
@@ -21,6 +18,7 @@ pub struct KeyValueStore {
 const EX: &'static str = "EX";
 const PX: &'static str = "PX";
 const OK: &'static str = "OK";
+const NONE: &'static str = "none";
 
 impl KeyValueStore {
     fn new() -> Self {
@@ -33,14 +31,11 @@ impl KeyValueStore {
     }
 
     pub fn pop_first_or_wait(&self, list_name: String, duration: Option<u64>) -> Vec<u8> {
-        let val = self.pop_first_ii(list_name.clone(), None);
+        let val = self.pop_first(list_name.clone(), None);
         if val != RespNull.into() {
-            let mut response: Vec<Value> = vec![];
-            response.push(Value::String(list_name));
-            response.push(val);
-            let array = Value::Array(response);
-            return encode(&array);
+            return self.build_list_response(&list_name, val);
         }
+
         let mut rx = self
             .notifiers
             .lock()
@@ -48,36 +43,42 @@ impl KeyValueStore {
             .entry(list_name.clone())
             .or_insert_with(|| watch::channel(None).0)
             .subscribe();
-        println!(" ++++++++ duration {:?}" ,duration);
-        let time = Instant::now();
-        let timeout = Duration::from_millis(duration.unwrap_or(0));
+
+        let timeout_millis = duration.unwrap_or(0);
+        let has_timeout = timeout_millis != 0;
+        let start_time = Instant::now();
+        let timeout_duration = Duration::from_millis(timeout_millis);
 
         loop {
-            if timeout.as_millis() != 0 && time.elapsed() > timeout {
+            if has_timeout && start_time.elapsed() > timeout_duration {
                 return encode(&Value::NullArray);
             }
-            if let Some(value) = rx.borrow_and_update().clone() {
-                let val = self.pop_first_ii(list_name.clone(), None);
-                //somebody was first to pop the element from the list, so we are waiting for the next one
+
+            if rx.borrow_and_update().is_some() {
+                let val = self.pop_first(list_name.clone(), None);
+                // Somebody was first to pop the element from the list, so we are waiting for the next one
                 if val == RespNull.into() {
                     continue;
                 }
-                let mut response: Vec<Value> = vec![];
-                response.push(Value::String(list_name));
-                response.push(val);
-                let array = Value::Array(response);
-                println!(" ++++++++ Sending response {:?}", array);
-                return encode(&array);
+                return self.build_list_response(&list_name, val);
             }
         }
     }
 
+    fn build_list_response(&self, list_name: &str, value: Value) -> Vec<u8> {
+        let response = vec![
+            Value::String(list_name.to_string()),
+            value,
+        ];
+        encode(&Value::Array(response))
+    }
+
     pub fn pop_first_no_wait(&self, list_name: String, count: Option<u64>) -> Vec<u8> {
-        let value = self.pop_first_ii(list_name, count);
+        let value = self.pop_first(list_name, count);
         encode_value(value)
     }
 
-    pub fn pop_first_ii(&self, list_name: String, count: Option<u64>) -> Value {
+    pub fn pop_first(&self, list_name: String, count: Option<u64>) -> Value {
         let mut lists = self.lists.lock().unwrap();
         let inner_list = match lists.get_mut(&list_name) {
             Some(list) => list,
@@ -87,39 +88,17 @@ impl KeyValueStore {
             return RespNull.into();
         }
         if let Some(count) = count {
-            return self.pop_multiple_elements_ii(inner_list, count);
+            return self.pop_multiple_elements(inner_list, count);
         }
         let first_value = inner_list.remove(0);
         RespString(first_value).into()
     }
 
-    fn pop_multiple_elements_ii(&self, list: &mut Vec<String>, count: u64) -> Value {
+    fn pop_multiple_elements(&self, list: &mut Vec<String>, count: u64) -> Value {
         let count_usize = count.try_into().unwrap_or(0);
         let items = list.drain(0..count_usize).collect::<Vec<String>>();
         RespArray(items).into()
     }
-
-    // pub fn pop_first(&self, list_name: String, count: Option<u64>) -> Vec<u8> {
-    //     let mut lists = self.lists.lock().unwrap();
-    //     let inner_list = match lists.get_mut(&list_name) {
-    //         Some(list) => list,
-    //         None => return encode_null(),
-    //     };
-    //     if inner_list.is_empty() {
-    //         return encode_null();
-    //     }
-    //     if let Some(count) = count {
-    //         return self.pop_multiple_elements(inner_list, count);
-    //     }
-    //     let first_value = inner_list.remove(0);
-    //     crate::encode_string(&first_value)
-    // }
-    //
-    // fn pop_multiple_elements(&self, list: &mut Vec<String>, count: u64) -> Vec<u8> {
-    //     let count_usize = count.try_into().unwrap_or(0);
-    //     let items = list.drain(0..count_usize).collect::<Vec<String>>();
-    //     crate::encode_vec(items)
-    // }
 
     pub fn len(&self, list_name: String) -> Vec<u8> {
         let lists = self.lists.lock().unwrap();
@@ -213,6 +192,15 @@ impl KeyValueStore {
             .as_millis();
 
         Ok(current_time + expire_in_millis)
+    }
+
+    pub fn type_of(&self, key: &str) -> Vec<u8> {
+        let mut store = self.store.lock().unwrap();
+        match store.get(key) {
+            //Some(value) => crate::encode_string(type_of(value)),
+            Some(value) => crate::encode_string("string"),
+            None => encode_string(NONE),
+        }
     }
 
     pub fn get(&self, key: &str) -> Vec<u8> {
