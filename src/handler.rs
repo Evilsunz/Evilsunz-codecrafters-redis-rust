@@ -1,5 +1,5 @@
 use crate::encode_string;
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 
@@ -9,6 +9,7 @@ pub enum Handler {
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
+    XRange(String, String, String),
     Get(String),
     RPush(String, Vec<String>),
     LPush(String, Vec<String>),
@@ -33,6 +34,7 @@ const LPOP: &str = "LPOP";
 const BLPOP: &str = "BLPOP";
 const TYPE: &str = "TYPE";
 const XADD: &str = "XADD";
+const XRANGE: &str = "XRANGE";
 
 impl Handler {
     pub fn from_command(vector: Vec<String>) -> Handler {
@@ -52,6 +54,10 @@ impl Handler {
             Some(RPUSH) => {
                 let (list_name, values) = Self::parse_one_and_list_args(&vector);
                 RPush(list_name, values)
+            },
+            Some(XRANGE) => {
+                let ( stream_name , start_id , end_id ) = Self::parse_three_args(&vector);
+                XRange(stream_name, start_id, end_id)
             },
             Some(LPUSH) => {
                 let (list_name, values) = Self::parse_one_and_list_args(&vector);
@@ -102,6 +108,7 @@ impl Handler {
             LPop(list_name,elem_number) => KV_STORE.pop_first_no_wait(list_name.clone(),elem_number.clone()),
             BLPop(list_name,elem_number) => KV_STORE.pop_first_or_wait(list_name.clone(),elem_number.clone()),
             XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id,vec.clone()),
+            XRange(stream_name, start_id, end_id) => STREAM_STORE.get_range(stream_name.clone(), start_id.clone(), end_id.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
     }
@@ -112,6 +119,10 @@ impl Handler {
 
     fn parse_two_args(vector: &[String]) -> Option<(String, String)> {
         Some((vector.get(1)?.clone(), vector.get(2)?.clone()))
+    }
+
+    fn parse_three_args(vector: &[String]) -> (String, String, String) {
+        (vector.get(1).cloned().unwrap_or_default(), vector.get(2).cloned().unwrap_or_default(), vector.get(3).cloned().unwrap_or_default())
     }
 
     fn parse_four_args(vector: &[String]) -> Option<(String, String, Option<String>, Option<u128>)> {

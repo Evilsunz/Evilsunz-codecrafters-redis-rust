@@ -42,6 +42,7 @@ pub fn encode_value<T: Into<Value>>(value: T) -> Vec<u8> {
 pub struct RespNull;
 pub struct RespInt(pub usize);
 pub struct RespArray(pub Vec<String>);
+pub struct RespArrayOfValue(pub Vec<Value>);
 pub struct RespString(pub String);
 pub struct RespBulkString(pub String);
 pub struct RespError(pub String);
@@ -83,6 +84,12 @@ impl Into<Value> for RespArray {
     }
 }
 
+impl Into<Value> for RespArrayOfValue {
+    fn into(self) -> Value {
+        Value::Array(self.0)
+    }
+}
+
 // Convenience functions for backward compatibility
 pub fn encode_null() -> Vec<u8> {
     encode_value(RespNull)
@@ -106,6 +113,10 @@ pub fn encode_int(i: &usize) -> Vec<u8> {
 
 pub fn encode_vec(v: Vec<String>) -> Vec<u8> {
     encode_value(RespArray(v))
+}
+
+pub fn encode_vec_of_value(v: Vec<Value>) -> Vec<u8> {
+    encode_value(RespArrayOfValue(v))
 }
 
 fn type_of<T>(_: T) -> &'static str {

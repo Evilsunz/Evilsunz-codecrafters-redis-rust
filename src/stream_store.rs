@@ -1,10 +1,11 @@
-use crate::{encode_bulk_string, encode_error};
+use crate::{encode_bulk_string, encode_error, encode_vec, encode_vec_of_value, RespArray, RespArrayOfValue, RespBulkString};
 use crate::encode_string;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
+use resp::Value;
 
 pub static STREAM_STORE: LazyLock<StreamStore> = LazyLock::new(|| StreamStore::new());
 
@@ -36,6 +37,42 @@ impl StreamStore {
         index_map.insert(new_stream_id, stream);
         index_map.sort_unstable_keys();
         encode_bulk_string(&format!("{}-{}", new_stream_id.time, new_stream_id.seq))
+    }
+
+
+    // [
+    //      [
+    //      "1526985054069-0",
+    //          [
+    //              "temperature",
+    //              "36",
+    //              "humidity",
+    //              "95"
+    //          ]
+    //       ],
+    // ]
+
+    pub fn get_range(&self, stream_key: String, start_id: String, end_id : String) -> Vec<u8> {
+        let start_stream_id = StreamId::parse_range(start_id, true);
+        let end_stream_id = StreamId::parse_range(end_id, false);
+        let mut store = self.store.lock().unwrap();
+        let stream_map = store.get(&stream_key);
+        if let Some(mut stream_map) = stream_map {
+            let collected = stream_map.clone()
+                .into_keys()
+                .filter(|k| k.is_within_range_by_stream_id(start_stream_id , end_stream_id))
+                .collect::<Vec<StreamId>>();
+            let mut final_result: Vec<Value> = vec!();
+            for stream_id in collected {
+                let mut vec:Vec<Value>= vec!();
+                let result = stream_map.get(&stream_id).unwrap();
+                vec.push(RespBulkString(stream_id.to_string()).into());
+                vec.push(RespArray(result.to_vec()).into());
+                final_result.push(RespArrayOfValue(vec).into())
+            }
+            return encode_vec_of_value(final_result)
+        }
+        encode_vec(vec![])
     }
 
     fn validate_new_stream_id(
@@ -141,6 +178,36 @@ impl StreamId {
             seq: id_vec[1].parse::<i64>().unwrap(),
         }
     }
+
+    fn to_string(&self) -> String {
+        format!("{}-{}", self.time, self.seq)
+    }
+
+    fn parse_range(id: String, is_start : bool) -> Self {
+        let mut id_vec: Vec<&str> = id.split("-").collect();
+        if id_vec.len() == 1 {
+            StreamId {
+                time: id_vec[0].parse::<i64>().unwrap(),
+                seq: if is_start { 0 } else { i64::MAX },
+            }
+        } else {
+            StreamId {
+                time: id_vec[0].parse::<i64>().unwrap(),
+                seq: id_vec[1].parse::<i64>().unwrap(),
+            }
+        }
+    }
+
+    pub fn is_within_range_by_stream_id(&self, start: StreamId, end: StreamId) -> bool {
+        self.time >= start.time && self.time <= end.time
+            && self.seq >= start.seq && self.seq <= end.seq
+    }
+
+    pub fn is_within_range(&self, start_time: i64, end_time: i64, start_seq: i64, end_seq: i64) -> bool {
+        self.time >= start_time && self.time <= end_time
+            && self.seq >= start_seq && self.seq <= end_seq
+    }
+
 }
 
 #[derive(Debug, Clone)]
@@ -163,5 +230,12 @@ impl Stream {
             stream.entities.insert(key, value);
         });
         stream
+    }
+
+    fn to_vec(&self) -> Vec<String> {
+        self.entities
+            .iter()
+            .flat_map(|(k, v)| [k.clone(), v.clone()])
+            .collect()
     }
 }
