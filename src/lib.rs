@@ -43,6 +43,7 @@ pub struct RespNull;
 pub struct RespInt(pub usize);
 pub struct RespArray(pub Vec<String>);
 pub struct RespString(pub String);
+pub struct RespBulkString(pub String);
 pub struct RespError(pub String);
 
 
@@ -55,6 +56,12 @@ impl Into<Value> for RespNull {
 impl Into<Value> for RespString {
     fn into(self) -> Value {
         Value::String(self.0)
+    }
+}
+
+impl Into<Value> for RespBulkString {
+    fn into(self) -> Value {
+        Value::Bulk(self.0)
     }
 }
 
@@ -83,6 +90,10 @@ pub fn encode_null() -> Vec<u8> {
 
 pub fn encode_string(s: &str) -> Vec<u8> {
     encode_value(RespString(String::from(s)))
+}
+
+pub fn encode_bulk_string(s: &str) -> Vec<u8> {
+    encode_value(RespBulkString(String::from(s)))
 }
 
 pub fn encode_error(s: &str) -> Vec<u8> {
