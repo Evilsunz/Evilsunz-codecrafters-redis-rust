@@ -201,6 +201,12 @@ impl StreamId {
                 seq: 0,
             };
         }
+        if id.eq("+"){
+            return StreamId {
+                time: i64::MAX,
+                seq: i64::MAX,
+            };
+        }
         let mut id_vec: Vec<&str> = id.split("-").collect();
         if id_vec.len() == 1 {
             StreamId {
