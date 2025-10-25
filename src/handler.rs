@@ -1,5 +1,6 @@
+use indexmap::IndexMap;
 use crate::encode_string;
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 
@@ -10,6 +11,7 @@ pub enum Handler {
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
     XRange(String, String, String),
+    XRead(IndexMap<String, String>),
     Get(String),
     RPush(String, Vec<String>),
     LPush(String, Vec<String>),
@@ -35,6 +37,7 @@ const BLPOP: &str = "BLPOP";
 const TYPE: &str = "TYPE";
 const XADD: &str = "XADD";
 const XRANGE: &str = "XRANGE";
+const XREAD: &str = "XREAD";
 
 impl Handler {
     pub fn from_command(vector: Vec<String>) -> Handler {
@@ -44,6 +47,9 @@ impl Handler {
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
             Some(LLEN) => Self::parse_single_arg(&vector).map(LLen).unwrap_or(Null),
             Some(TYPE) => Self::parse_single_arg(&vector).map(Type).unwrap_or(Null),
+            Some(XREAD) => {
+                XRead(Self::parse_hash_map(&vector))
+            },
             Some(SET) => Self::parse_four_args(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
                 .unwrap_or(Null),
@@ -108,7 +114,8 @@ impl Handler {
             LPop(list_name,elem_number) => KV_STORE.pop_first_no_wait(list_name.clone(),elem_number.clone()),
             BLPop(list_name,elem_number) => KV_STORE.pop_first_or_wait(list_name.clone(),elem_number.clone()),
             XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id,vec.clone()),
-            XRange(stream_name, start_id, end_id) => STREAM_STORE.get_range(stream_name.clone(), start_id.clone(), end_id.clone()),
+            XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
+            XRead(map) => STREAM_STORE.get_xread(map.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
     }
@@ -146,5 +153,16 @@ impl Handler {
         let values = vector.iter().skip(3).cloned().collect::<Vec<String>>();
         (list_name, id, values)
     }
-    
+
+    fn parse_hash_map(vector: &[String]) -> IndexMap<String, String> {
+        let mut vec = vector.iter().skip(2).cloned().collect::<Vec<String>>();
+        let vec2 = vec.split_off(vec.len()/2);
+        let mut map: IndexMap<String, String> = IndexMap::new();
+        vec.iter().zip(vec2.iter()).for_each(|(k,v)| {
+            map.entry(k.to_string()).or_insert(v.to_string());
+        });
+        println!("map: {:?}", map);
+        map
+    }
+
 }

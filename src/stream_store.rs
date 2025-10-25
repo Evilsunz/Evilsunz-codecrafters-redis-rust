@@ -42,6 +42,22 @@ impl StreamStore {
         encode_bulk_string(&format!("{}-{}", new_stream_id.time, new_stream_id.seq))
     }
 
+    pub fn get_xread(&self, stream_and_id : IndexMap<String, String>) -> Vec<u8>{
+        let mut final_result: Vec<Value> = vec![];
+        stream_and_id.iter().for_each(|(stream_name, stream_id)| {
+            let mut vec: Vec<Value> = vec![];
+            let result = self.get_range(stream_name.clone(), stream_id.clone(), "+".to_string());
+            vec.push(RespBulkString(stream_name.to_string()).into());
+            vec.push(RespArrayOfValue(result).into());
+            final_result.push(RespArrayOfValue(vec).into())
+        });
+        encode_vec_of_value(final_result)
+    }
+
+    pub fn get_xrange(&self, stream_key: String, start_id: String, end_id: String) -> Vec<u8>{
+        encode_vec_of_value(self.get_range(stream_key, start_id, end_id))
+    }
+
     // [
     //      [
     //      "1526985054069-0",
@@ -54,13 +70,13 @@ impl StreamStore {
     //       ],
     // ]
 
-    pub fn get_range(&self, stream_key: String, start_id: String, end_id: String) -> Vec<u8> {
+    pub fn get_range(&self, stream_key: String, start_id: String, end_id: String,) -> Vec<Value> {
         let start_stream_id = StreamId::parse_range(start_id, true);
         let end_stream_id = StreamId::parse_range(end_id, false);
         let mut store = self.store.lock().unwrap();
         let stream_map = store.get(&stream_key);
         if let Some(mut stream_map) = stream_map {
-            let collected = stream_map
+            let mut collected = stream_map
                 .clone()
                 .into_keys()
                 .filter(|k| k.is_within_range_by_stream_id(start_stream_id, end_stream_id))
@@ -73,9 +89,9 @@ impl StreamStore {
                 vec.push(RespArray(result.to_vec()).into());
                 final_result.push(RespArrayOfValue(vec).into())
             }
-            return encode_vec_of_value(final_result);
+            return final_result;
         }
-        encode_vec(vec![])
+        vec![]
     }
 
     fn validate_new_stream_id(
