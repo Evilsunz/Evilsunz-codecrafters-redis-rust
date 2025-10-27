@@ -231,7 +231,12 @@ impl KeyValueStore {
             }
         }
         match store.get(key) {
-            Some(value) => crate::encode_string(value),
+            Some(value) => return crate::encode_string(value),
+            None => {}
+        }
+        let mut store = self.int_store.lock().unwrap();
+        match store.get(key) {
+            Some(value) => crate::encode_string(&value.to_string()),
             None => encode(&Value::Null),
         }
     }
