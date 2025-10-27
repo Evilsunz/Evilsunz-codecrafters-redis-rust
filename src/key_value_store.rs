@@ -1,4 +1,4 @@
-use crate::{encode_int, encode_null, encode_string, encode_value, encode_vec, type_of, RespArray, RespNull, RespString};
+use crate::{encode_error, encode_int, encode_null, encode_string, encode_value, encode_vec, type_of, RespArray, RespNull, RespString};
 use resp::{encode, Value};
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
@@ -10,7 +10,7 @@ pub static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::n
 
 pub struct KeyValueStore {
     store: Mutex<HashMap<String, String>>,
-    int_store: Mutex<HashMap<String, i64>>,
+    //int_store: Mutex<HashMap<String, i64>>,
     expire: Mutex<HashMap<String, u128>>,
     lists: Mutex<HashMap<String, Vec<String>>>,
     notifiers: Mutex<HashMap<String, watch::Sender<Option<String>>>>,
@@ -20,6 +20,7 @@ const EX: &'static str = "EX";
 const PX: &'static str = "PX";
 const OK: &'static str = "OK";
 const NONE: &'static str = "none";
+const ERROR_NOT_INT: &str = "ERR value is not an integer or out of range";
 
 impl KeyValueStore {
     fn new() -> Self {
@@ -28,7 +29,7 @@ impl KeyValueStore {
             expire: Mutex::new(HashMap::new()),
             lists: Mutex::new(HashMap::new()),
             notifiers: Mutex::new(HashMap::new()),
-            int_store: Mutex::new(HashMap::new()),
+            // int_store: Mutex::new(HashMap::new()),
         }
     }
 
@@ -68,10 +69,7 @@ impl KeyValueStore {
     }
 
     fn build_list_response(&self, list_name: &str, value: Value) -> Vec<u8> {
-        let response = vec![
-            Value::String(list_name.to_string()),
-            value,
-        ];
+        let response = vec![Value::String(list_name.to_string()), value];
         encode(&Value::Array(response))
     }
 
@@ -120,7 +118,10 @@ impl KeyValueStore {
         println!("Adding to list: {:?}", internal_list);
         if let Some(tx) = self.notifiers.lock().unwrap().get(&list_name) {
             println!("Sending notification");
-            println!(" ++++++++ Sending notification to {:?}", tx.receiver_count());
+            println!(
+                " ++++++++ Sending notification to {:?}",
+                tx.receiver_count()
+            );
             let _ = tx.send(Some(String::from("UPD")));
         }
         println!("Done sending notification");
@@ -153,13 +154,21 @@ impl KeyValueStore {
         }
     }
 
-    pub fn incr(&self,  key : String) -> Vec<u8> {
-            let mut int_store = self.int_store.lock().unwrap();
-            let new_value = int_store
-                .entry(key)
-                .and_modify(|v| *v += 1)
-                .or_insert(1);
-            encode_int(&(*new_value as usize))
+    pub fn incr(&self, key: String) -> Vec<u8> {
+            let mut int_store = self.store.lock().unwrap();
+            if let Some(existing_value) = int_store.get(&key) {
+                match existing_value.parse::<usize>() {
+                    Ok(current) => {
+                        let new_value = current + 1;
+                        int_store.insert(key, new_value.to_string());
+                        encode_int(&new_value)
+                    }
+                    Err(_) => encode_error(ERROR_NOT_INT),
+                }
+            } else {
+                int_store.insert(key, String::from("1"));
+                encode_int(&1)
+            }
     }
 
     pub fn set(
@@ -180,16 +189,8 @@ impl KeyValueStore {
                 }
             }
         }
-        let int_result = value.parse::<i64>();
-        let value_to_store = int_result.ok();
-
-        if let Some(int_value) = value_to_store {
-            let mut store = self.int_store.lock().unwrap();
-            store.insert(key, int_value);
-        } else {
-            let mut store = self.store.lock().unwrap();
-            store.insert(key, value);
-        }
+        let mut store = self.store.lock().unwrap();
+        store.insert(key, value);
         crate::encode_string(OK)
     }
 
@@ -231,12 +232,7 @@ impl KeyValueStore {
             }
         }
         match store.get(key) {
-            Some(value) => return crate::encode_string(value),
-            None => {}
-        }
-        let mut store = self.int_store.lock().unwrap();
-        match store.get(key) {
-            Some(value) => crate::encode_string(&value.to_string()),
+            Some(value) => encode_string(value),
             None => encode(&Value::Null),
         }
     }
