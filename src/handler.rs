@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_to_value, encode_error, encode_string, encode_vec, encode_vec_of_value, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -12,6 +12,7 @@ use resp::Value;
 pub enum Handler<'a> {
     Ping,
     Multi,
+    Discard(RefCell<&'a mut TXContext>),
     Exec(RefCell<&'a mut TXContext>),
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
@@ -49,17 +50,23 @@ const XREAD: &str = "XREAD";
 const INCR: &str = "INCR";
 const MULTI: &str = "MULTI";
 const EXEC: &str = "EXEC";
+const DISCARD: &str = "DISCARD";
+
 const OK: &'static str = "OK";
 
 const ERROR_EXEC_WITHOUT_MULTI: &str = "ERR EXEC without MULTI";
+const ERROR_DISCARD_WITHOUT_MULTI: &str = "ERR DISCARD without MULTI";
 
 
 const BLOCK: &str = "block";
 
 impl Handler<'_> {
     pub fn from_command(vector: Vec<String>, tx_context: &mut TXContext) -> Handler {
-        if tx_context.is_active && !vector.first().map(|s| s.as_str()).unwrap_or("").eq(EXEC) {
+        if tx_context.is_active &&
+            !vector.first().map(|s| s.as_str()).unwrap_or("").eq(EXEC) &&
+            !vector.first().map(|s| s.as_str()).unwrap_or("").eq(DISCARD) {
             tx_context.store.push(vector.clone());
+            println!("Adding command to queue: {:?}", vector);
             return Queued;
         }
         match vector.first().map(|s| s.as_str()) {
@@ -70,6 +77,9 @@ impl Handler<'_> {
             },
             Some(EXEC) => {
                 Exec(RefCell::new(tx_context))
+            },
+            Some(DISCARD) => {
+                Discard(RefCell::new(tx_context))
             },
             Some(ECHO) => Self::parse_single_arg(&vector).map(Echo).unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
@@ -150,6 +160,17 @@ impl Handler<'_> {
             Multi => {
                 encode_string(OK)
             },
+            Discard(tx_context) => {
+                if  { tx_context.borrow().is_active } {
+                    let mut tx_context_borrowed = tx_context.borrow_mut();
+                    tx_context_borrowed.is_active = false;
+                    tx_context_borrowed.store.clear();
+                    encode_string(OK)
+                } else {
+                    encode_error(ERROR_DISCARD_WITHOUT_MULTI)
+                }
+
+            }
             Exec(tx_context) => {
                 if tx_context.borrow().is_active {
                     let mut tx_context_borrowed = tx_context.borrow_mut();
