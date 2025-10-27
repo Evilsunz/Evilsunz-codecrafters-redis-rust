@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
-use codecrafters_redis::{decode_resp_array, encode_string, Handler};
+use codecrafters_redis::{decode_resp_array, encode_string, Handler, TXContext};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
@@ -20,6 +20,7 @@ fn main() {
     }
 
     fn handle_stream(mut stream: TcpStream) {
+        let mut tx_context = TXContext::default();
         loop {
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
@@ -27,7 +28,7 @@ fn main() {
                 panic!("Failed to decode command {}", String::from_utf8_lossy(&buffer));
             });
             println!("Decoded +++++ {:?}", decoded_command);
-            let response =Handler::from_command(decoded_command).process_command();
+            let response =Handler::from_command(decoded_command,&mut tx_context).process_command();
             stream.write_all(&response).unwrap();
         }
     }

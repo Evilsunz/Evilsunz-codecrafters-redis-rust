@@ -1,4 +1,4 @@
-use crate::{encode_error, encode_int, encode_null, encode_string, encode_value, encode_vec, type_of, RespArray, RespNull, RespString};
+use crate::{encode_error, encode_int, encode_null, encode_string, encode_value, encode_vec, type_of, RespArray, RespNull, RespString, TXContext};
 use resp::{encode, Value};
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
@@ -159,8 +159,13 @@ impl KeyValueStore {
         encode_string(OK)
     }
 
-    pub fn exec(&self) -> Vec<u8>{
-        encode_error(ERROR_EXEC_WITHOUT_MULTI)
+    pub fn exec(&self, txcontext: &mut TXContext) -> Vec<u8> {
+        if txcontext.is_active {
+            txcontext.is_active = false;
+            encode_vec(vec!())
+        } else {
+            encode_error(ERROR_EXEC_WITHOUT_MULTI)
+        }
     }
 
     pub fn incr(&self, key: String) -> Vec<u8> {

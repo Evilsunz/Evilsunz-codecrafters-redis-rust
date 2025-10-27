@@ -8,6 +8,21 @@ use std::io::BufReader;
 use resp::{encode, Decoder, Value};
 pub use crate::handler::Handler;
 
+#[derive(Debug)]
+pub struct TXContext {
+    pub is_active: bool,
+    pub store: Vec<String>
+}
+
+impl Default for TXContext {
+    fn default() -> Self {
+        TXContext {
+            is_active: false,
+            store: vec![],
+        }
+    }
+}
+
 fn value_to_string(value: &Value) -> String {
     match value {
         Value::Bulk(bytes) => String::from_utf8_lossy(bytes.as_ref()).to_string(),

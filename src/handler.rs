@@ -1,15 +1,16 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
-use crate::encode_string;
+use crate::{encode_string, TXContext};
 use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
+use std::cell::RefCell;
 
 #[derive(Debug)]
-pub enum Handler {
+pub enum Handler<'a> {
     Ping,
     Multi,
-    Exec,
+    Exec(RefCell<&'a mut TXContext>),
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
@@ -49,12 +50,17 @@ const EXEC: &str = "EXEC";
 
 const BLOCK: &str = "block";
 
-impl Handler {
-    pub fn from_command(vector: Vec<String>) -> Handler {
+impl Handler<'_> {
+    pub fn from_command(vector: Vec<String>, tx_context:  &mut TXContext) -> Handler {
         match vector.first().map(|s| s.as_str()) {
             Some(PING) => Ping,
-            Some(MULTI) => Multi,
-            Some(EXEC) => Exec,
+            Some(MULTI) => {
+                tx_context.is_active = true;
+                Multi
+            },
+            Some(EXEC) => {
+                Exec(RefCell::new(tx_context))
+            },
             Some(ECHO) => Self::parse_single_arg(&vector).map(Echo).unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
             Some(LLEN) => Self::parse_single_arg(&vector).map(LLen).unwrap_or(Null),
@@ -132,7 +138,9 @@ impl Handler {
             XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
             XRead(timeout, map) => STREAM_STORE.get_xread(map.clone(), timeout.clone()),
             Multi => KV_STORE.multi(),
-            Exec => KV_STORE.exec(),
+            Exec(tx_context) => {
+                KV_STORE.exec(&mut tx_context.borrow_mut())
+            },
             Null => crate::encode_string("Command not recognized"),
         }
     }
