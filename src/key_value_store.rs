@@ -154,6 +154,10 @@ impl KeyValueStore {
         }
     }
 
+    pub fn multi(&self) -> Vec<u8>{
+        encode_string(OK)
+    }
+
     pub fn incr(&self, key: String) -> Vec<u8> {
             let mut int_store = self.store.lock().unwrap();
             if let Some(existing_value) = int_store.get(&key) {

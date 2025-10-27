@@ -1,13 +1,14 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::encode_string;
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 
 #[derive(Debug)]
 pub enum Handler {
     Ping,
+    Multi,
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
@@ -41,6 +42,7 @@ const XADD: &str = "XADD";
 const XRANGE: &str = "XRANGE";
 const XREAD: &str = "XREAD";
 const INCR: &str = "INCR";
+const MULTI: &str = "MULTI";
 
 
 const BLOCK: &str = "block";
@@ -49,6 +51,7 @@ impl Handler {
     pub fn from_command(vector: Vec<String>) -> Handler {
         match vector.first().map(|s| s.as_str()) {
             Some(PING) => Ping,
+            Some(MULTI) => Multi,
             Some(ECHO) => Self::parse_single_arg(&vector).map(Echo).unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
             Some(LLEN) => Self::parse_single_arg(&vector).map(LLen).unwrap_or(Null),
@@ -125,6 +128,7 @@ impl Handler {
             XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id,vec.clone()),
             XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
             XRead(timeout, map) => STREAM_STORE.get_xread(map.clone(), timeout.clone()),
+            Multi => KV_STORE.multi(),
             Null => crate::encode_string("Command not recognized"),
         }
     }
