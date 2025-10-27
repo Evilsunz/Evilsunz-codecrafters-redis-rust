@@ -1,14 +1,15 @@
-use crate::encode_string;
+use crate::{encode_string, RespNull};
 use crate::{
     encode_bulk_string, encode_error, encode_vec, encode_vec_of_value, RespArray, RespArrayOfValue,
     RespBulkString,
 };
 use indexmap::IndexMap;
-use resp::Value;
+use resp::{encode, Value};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::{LazyLock, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
+use tokio::sync::watch;
 
 pub static STREAM_STORE: LazyLock<StreamStore> = LazyLock::new(|| StreamStore::new());
 
@@ -18,12 +19,14 @@ const ERROR_ID_0_0: &str = "ERR The ID specified in XADD must be greater than 0-
 
 pub struct StreamStore {
     store: Mutex<HashMap<String, IndexMap<StreamId, Stream>>>,
+    notifiers: Mutex<HashMap<String, watch::Sender<Option<String>>>>,
 }
 
 impl StreamStore {
     fn new() -> Self {
         Self {
             store: Mutex::new(HashMap::new()),
+            notifiers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -36,13 +39,55 @@ impl StreamStore {
         };
 
         let stream = Stream::from_vec(vec);
-        let index_map = store.entry(stream_key).or_insert_with(IndexMap::new);
+        let index_map = store.entry(stream_key.clone()).or_insert_with(IndexMap::new);
         index_map.insert(new_stream_id, stream);
         index_map.sort_unstable_keys();
-        encode_bulk_string(&format!("{}-{}", new_stream_id.time, new_stream_id.seq))
+        let new_stream_id_str = &format!("{}-{}", new_stream_id.time, new_stream_id.seq);
+        if let Some(tx) = self.notifiers.lock().unwrap().get(&stream_key) {
+            println!("Sending notification");
+            println!(" ++++++++ Sending notification to {:?}", tx.receiver_count());
+            let _ = tx.send(Some(new_stream_id_str.to_string()));
+        }
+        encode_bulk_string(new_stream_id_str)
     }
 
-    pub fn get_xread(&self, stream_and_id : IndexMap<String, String>) -> Vec<u8>{
+    pub fn get_xread(&self, stream_and_id : IndexMap<String, String>, timeout: Option<u64>) -> Vec<u8>{
+        if timeout.is_some() {
+            println!("Timeout is {:?}", timeout);
+            let mut rx = self
+                .notifiers
+                .lock()
+                .unwrap()
+                .entry(stream_and_id.iter().nth(0).unwrap().0.clone())
+                .or_insert_with(|| watch::channel(None).0)
+                .subscribe();
+
+            let timeout_millis = timeout.unwrap_or(0);
+            let has_timeout = timeout_millis != 0;
+            let start_time = Instant::now();
+            let timeout_duration = Duration::from_millis(timeout_millis);
+
+            loop {
+                if has_timeout && start_time.elapsed() > timeout_duration {
+                    return encode(&Value::NullArray);
+                }
+
+                if let Some(stream_id) = rx.borrow_and_update().clone() {
+                    println!("Got stream id VIA CHANNEL : {:?}", stream_id);
+                    self.notifiers.lock().unwrap().remove(stream_and_id.iter().nth(0).unwrap().0);
+                    let mut new_stream_id : IndexMap<String,String> = IndexMap::new();
+                    new_stream_id.insert(stream_and_id.iter().nth(0).unwrap().0.clone(), stream_id);
+                    println!("New stream id map: {:?}", new_stream_id);
+                    return self.xread(new_stream_id);
+                }
+            }
+        } else {
+            println!("No Timeout is {:?}", timeout);
+            self.xread(stream_and_id)
+        }
+    }
+
+    pub fn xread(&self, stream_and_id : IndexMap<String, String>) -> Vec<u8>{
         let mut final_result: Vec<Value> = vec![];
         stream_and_id.iter().for_each(|(stream_name, stream_id)| {
             let mut vec: Vec<Value> = vec![];
@@ -57,18 +102,6 @@ impl StreamStore {
     pub fn get_xrange(&self, stream_key: String, start_id: String, end_id: String) -> Vec<u8>{
         encode_vec_of_value(self.get_range(stream_key, start_id, end_id))
     }
-
-    // [
-    //      [
-    //      "1526985054069-0",
-    //          [
-    //              "temperature",
-    //              "36",
-    //              "humidity",
-    //              "95"
-    //          ]
-    //       ],
-    // ]
 
     pub fn get_range(&self, stream_key: String, start_id: String, end_id: String,) -> Vec<Value> {
         let start_stream_id = StreamId::parse_range(start_id, true);

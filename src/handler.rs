@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use tokio::time::timeout;
 use crate::encode_string;
 use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
 use crate::key_value_store::KV_STORE;
@@ -11,7 +12,7 @@ pub enum Handler {
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
     XRange(String, String, String),
-    XRead(IndexMap<String, String>),
+    XRead(Option<u64>, IndexMap<String, String>),
     Get(String),
     RPush(String, Vec<String>),
     LPush(String, Vec<String>),
@@ -39,6 +40,9 @@ const XADD: &str = "XADD";
 const XRANGE: &str = "XRANGE";
 const XREAD: &str = "XREAD";
 
+
+const BLOCK: &str = "block";
+
 impl Handler {
     pub fn from_command(vector: Vec<String>) -> Handler {
         match vector.first().map(|s| s.as_str()) {
@@ -48,7 +52,8 @@ impl Handler {
             Some(LLEN) => Self::parse_single_arg(&vector).map(LLen).unwrap_or(Null),
             Some(TYPE) => Self::parse_single_arg(&vector).map(Type).unwrap_or(Null),
             Some(XREAD) => {
-                XRead(Self::parse_hash_map(&vector))
+                let (timeout , config) = Self::parse_hash_map(&vector);
+                XRead(timeout, config)
             },
             Some(SET) => Self::parse_four_args(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
@@ -115,7 +120,7 @@ impl Handler {
             BLPop(list_name,elem_number) => KV_STORE.pop_first_or_wait(list_name.clone(),elem_number.clone()),
             XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id,vec.clone()),
             XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
-            XRead(map) => STREAM_STORE.get_xread(map.clone()),
+            XRead(timeout, map) => STREAM_STORE.get_xread(map.clone(), timeout.clone()),
             Null => crate::encode_string("Command not recognized"),
         }
     }
@@ -154,15 +159,22 @@ impl Handler {
         (list_name, id, values)
     }
 
-    fn parse_hash_map(vector: &[String]) -> IndexMap<String, String> {
-        let mut vec = vector.iter().skip(2).cloned().collect::<Vec<String>>();
+    fn parse_hash_map(vector: &[String]) -> (Option<u64>, IndexMap<String, String>) {
+        let timeout = match vector.get(1) {
+            Some(cmd) if cmd.to_lowercase().eq(BLOCK) => vector.get(2).and_then(|s| s.parse::<u64>().ok()),
+            _ => None,
+        };
+
+        let skip_count = if timeout.is_some() { 4 } else { 2 };
+        let iter = vector.iter().skip(skip_count);
+
+        let mut vec = iter.cloned().collect::<Vec<String>>();
         let vec2 = vec.split_off(vec.len()/2);
         let mut map: IndexMap<String, String> = IndexMap::new();
         vec.iter().zip(vec2.iter()).for_each(|(k,v)| {
             map.entry(k.to_string()).or_insert(v.to_string());
         });
-        println!("map: {:?}", map);
-        map
+        (timeout, map)
     }
 
 }
