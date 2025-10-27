@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::encode_string;
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 
@@ -21,6 +21,7 @@ pub enum Handler {
     LPop(String, Option<u64>),
     BLPop(String, Option<u64>),
     Type(String),
+    Incr(String),
     Null,
 }
 
@@ -39,6 +40,7 @@ const TYPE: &str = "TYPE";
 const XADD: &str = "XADD";
 const XRANGE: &str = "XRANGE";
 const XREAD: &str = "XREAD";
+const INCR: &str = "INCR";
 
 
 const BLOCK: &str = "block";
@@ -51,6 +53,7 @@ impl Handler {
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
             Some(LLEN) => Self::parse_single_arg(&vector).map(LLen).unwrap_or(Null),
             Some(TYPE) => Self::parse_single_arg(&vector).map(Type).unwrap_or(Null),
+            Some(INCR) => Self::parse_single_arg(&vector).map(Incr).unwrap_or(Null),
             Some(XREAD) => {
                 let (timeout , config) = Self::parse_hash_map(&vector);
                 XRead(timeout, config)
@@ -102,6 +105,7 @@ impl Handler {
         match self {
             Ping => crate::encode_string("PONG"),
             Echo(str) => crate::encode_string(str),
+            Incr(str) => KV_STORE.incr(str.clone()),
             Set(key, value, expire, expire_unit) => {
                 KV_STORE.set(key.clone(), value.clone(), expire.clone() , expire_unit.clone())
             }

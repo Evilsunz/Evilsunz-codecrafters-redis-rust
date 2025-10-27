@@ -10,6 +10,7 @@ pub static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::n
 
 pub struct KeyValueStore {
     store: Mutex<HashMap<String, String>>,
+    int_store: Mutex<HashMap<String, i64>>,
     expire: Mutex<HashMap<String, u128>>,
     lists: Mutex<HashMap<String, Vec<String>>>,
     notifiers: Mutex<HashMap<String, watch::Sender<Option<String>>>>,
@@ -27,6 +28,7 @@ impl KeyValueStore {
             expire: Mutex::new(HashMap::new()),
             lists: Mutex::new(HashMap::new()),
             notifiers: Mutex::new(HashMap::new()),
+            int_store: Mutex::new(HashMap::new()),
         }
     }
 
@@ -151,6 +153,15 @@ impl KeyValueStore {
         }
     }
 
+    pub fn incr(&self,  key : String) -> Vec<u8> {
+            let mut int_store = self.int_store.lock().unwrap();
+            let new_value = int_store
+                .entry(key)
+                .and_modify(|v| *v += 1)
+                .or_insert(1);
+            encode_int(&(*new_value as usize))
+    }
+
     pub fn set(
         &self,
         key: String,
@@ -169,9 +180,16 @@ impl KeyValueStore {
                 }
             }
         }
+        let int_result = value.parse::<i64>();
+        let value_to_store = int_result.ok();
 
-        let mut store = self.store.lock().unwrap();
-        store.insert(key, value);
+        if let Some(int_value) = value_to_store {
+            let mut store = self.int_store.lock().unwrap();
+            store.insert(key, int_value);
+        } else {
+            let mut store = self.store.lock().unwrap();
+            store.insert(key, value);
+        }
         crate::encode_string(OK)
     }
 
