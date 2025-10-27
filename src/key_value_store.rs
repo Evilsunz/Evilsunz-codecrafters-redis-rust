@@ -21,7 +21,6 @@ const PX: &'static str = "PX";
 const OK: &'static str = "OK";
 const NONE: &'static str = "none";
 const ERROR_NOT_INT: &str = "ERR value is not an integer or out of range";
-const ERROR_EXEC_WITHOUT_MULTI: &str = "ERR EXEC without MULTI";
 
 impl KeyValueStore {
     fn new() -> Self {
@@ -152,19 +151,6 @@ impl KeyValueStore {
         match slice_indices {
             Some((start_idx, end_idx)) => encode_vec(inner_list[start_idx..=end_idx].to_vec()),
             None => encode_vec(vec![]),
-        }
-    }
-
-    pub fn multi(&self) -> Vec<u8>{
-        encode_string(OK)
-    }
-
-    pub fn exec(&self, txcontext: &mut TXContext) -> Vec<u8> {
-        if txcontext.is_active {
-            txcontext.is_active = false;
-            encode_vec(vec!())
-        } else {
-            encode_error(ERROR_EXEC_WITHOUT_MULTI)
         }
     }
 

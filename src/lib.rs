@@ -32,6 +32,11 @@ fn value_to_string(value: &Value) -> String {
     }
 }
 
+pub fn decode_to_value(vec : Vec<u8>) -> Value {
+    let mut decoder = Decoder::new(BufReader::new(vec.as_slice()));
+    decoder.decode().unwrap()
+}
+
 pub fn decode_resp_array(buf: &[u8]) -> Option<Vec<String>> {
     let mut decoder = Decoder::new(BufReader::new(buf));
     let decoded = match decoder.decode() {
@@ -58,6 +63,7 @@ pub struct RespNull;
 pub struct RespInt(pub usize);
 pub struct RespArray(pub Vec<String>);
 pub struct RespArrayOfValue(pub Vec<Value>);
+pub struct RespArrayOfValueBulk(pub Vec<u8>);
 pub struct RespString(pub String);
 pub struct RespBulkString(pub String);
 pub struct RespError(pub String);
@@ -133,6 +139,7 @@ pub fn encode_vec(v: Vec<String>) -> Vec<u8> {
 pub fn encode_vec_of_value(v: Vec<Value>) -> Vec<u8> {
     encode_value(RespArrayOfValue(v))
 }
+
 
 fn type_of<T>(_: T) -> &'static str {
     type_name::<T>()

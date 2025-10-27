@@ -1,10 +1,12 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
-use crate::{encode_string, TXContext};
+use crate::{decode_to_value, encode_error, encode_string, encode_vec, encode_vec_of_value, TXContext};
 use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
+use std::fmt::format;
+use resp::Value;
 
 #[derive(Debug)]
 pub enum Handler<'a> {
@@ -47,12 +49,15 @@ const XREAD: &str = "XREAD";
 const INCR: &str = "INCR";
 const MULTI: &str = "MULTI";
 const EXEC: &str = "EXEC";
+const OK: &'static str = "OK";
+
+const ERROR_EXEC_WITHOUT_MULTI: &str = "ERR EXEC without MULTI";
 
 
 const BLOCK: &str = "block";
 
 impl Handler<'_> {
-    pub fn from_command(vector: Vec<String>, tx_context:  &mut TXContext) -> Handler {
+    pub fn from_command(vector: Vec<String>, tx_context: &mut TXContext) -> Handler {
         if tx_context.is_active && !vector.first().map(|s| s.as_str()).unwrap_or("").eq(EXEC) {
             tx_context.store.push(vector.clone());
             return Queued;
@@ -142,9 +147,23 @@ impl Handler<'_> {
             XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id,vec.clone()),
             XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
             XRead(timeout, map) => STREAM_STORE.get_xread(map.clone(), timeout.clone()),
-            Multi => KV_STORE.multi(),
+            Multi => {
+                encode_string(OK)
+            },
             Exec(tx_context) => {
-                KV_STORE.exec(&mut tx_context.borrow_mut())
+                if tx_context.borrow().is_active {
+                    let mut tx_context_borrowed = tx_context.borrow_mut();
+                    tx_context_borrowed.is_active = false;
+                    let mut final_output: Vec<Value> = vec!();
+                    for command in tx_context_borrowed.store.iter() {
+                        println!("Executing command: {:?}", command);
+                        let mut output = Handler::from_command(command.clone() , &mut TXContext::default()).process_command();
+                        final_output.push(decode_to_value(output));
+                    }
+                    encode_vec_of_value(final_output)
+                } else {
+                    encode_error(ERROR_EXEC_WITHOUT_MULTI)
+                }
             },
             Queued => crate::encode_string("QUEUED"),
             Null => crate::encode_string("Command not recognized"),
