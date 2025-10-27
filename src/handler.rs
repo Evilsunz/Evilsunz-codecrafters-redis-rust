@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{encode_string, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -25,6 +25,7 @@ pub enum Handler<'a> {
     BLPop(String, Option<u64>),
     Type(String),
     Incr(String),
+    Queued,
     Null,
 }
 
@@ -52,6 +53,10 @@ const BLOCK: &str = "block";
 
 impl Handler<'_> {
     pub fn from_command(vector: Vec<String>, tx_context:  &mut TXContext) -> Handler {
+        if tx_context.is_active && !vector.first().map(|s| s.as_str()).unwrap_or("").eq(EXEC) {
+            tx_context.store.push(vector.clone());
+            return Queued;
+        }
         match vector.first().map(|s| s.as_str()) {
             Some(PING) => Ping,
             Some(MULTI) => {
@@ -141,6 +146,7 @@ impl Handler<'_> {
             Exec(tx_context) => {
                 KV_STORE.exec(&mut tx_context.borrow_mut())
             },
+            Queued => crate::encode_string("QUEUED"),
             Null => crate::encode_string("Command not recognized"),
         }
     }

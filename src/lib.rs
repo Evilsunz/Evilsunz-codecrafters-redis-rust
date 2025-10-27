@@ -11,7 +11,7 @@ pub use crate::handler::Handler;
 #[derive(Debug)]
 pub struct TXContext {
     pub is_active: bool,
-    pub store: Vec<String>
+    pub store: Vec<Vec<String>>
 }
 
 impl Default for TXContext {
