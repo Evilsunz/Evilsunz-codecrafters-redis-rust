@@ -1,4 +1,4 @@
-use crate::{encode_string, RespNull};
+use crate::{encode_str, RespNull};
 use crate::{
     encode_bulk_string, encode_error, encode_vec, encode_vec_of_value, RespArray, RespArrayOfValue,
     RespBulkString,

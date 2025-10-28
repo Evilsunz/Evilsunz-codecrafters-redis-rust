@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
 use std::thread;
 use clap::Parser;
-use codecrafters_redis::{decode_resp_array, encode_string, Handler, TXContext};
+use codecrafters_redis::{decode_resp_array, encode_str, Handler, TXContext};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

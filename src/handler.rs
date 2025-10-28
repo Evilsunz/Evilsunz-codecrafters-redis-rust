@@ -1,12 +1,13 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
-use crate::{decode_to_value, encode_error, encode_string, encode_vec, encode_vec_of_value, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard};
+use crate::{decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, TXContext};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt::format;
 use resp::Value;
+use crate::replication::get_info;
 
 #[derive(Debug)]
 pub enum Handler<'a> {
@@ -29,6 +30,8 @@ pub enum Handler<'a> {
     Type(String),
     Incr(String),
     Queued,
+    //Replication
+    Info(String),
     Null,
 }
 
@@ -48,10 +51,13 @@ const XADD: &str = "XADD";
 const XRANGE: &str = "XRANGE";
 const XREAD: &str = "XREAD";
 const INCR: &str = "INCR";
+// Transactions
 const MULTI: &str = "MULTI";
 const EXEC: &str = "EXEC";
 const DISCARD: &str = "DISCARD";
-
+//replication
+const INFO: &str = "INFO";
+//misc
 const OK: &'static str = "OK";
 
 const ERROR_EXEC_WITHOUT_MULTI: &str = "ERR EXEC without MULTI";
@@ -129,14 +135,15 @@ impl Handler<'_> {
                 let end = values.get(1).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
                 LRange(list_name, start, end)
             },
+            Some(INFO) => Self::parse_single_arg(&vector).map(Info).unwrap_or(Null),
             _ => Null,
         }
     }
 
     pub fn process_command(&self) -> Vec<u8> {
         match self {
-            Ping => crate::encode_string("PONG"),
-            Echo(str) => crate::encode_string(str),
+            Ping => crate::encode_str("PONG"),
+            Echo(str) => crate::encode_str(str),
             Incr(str) => KV_STORE.incr(str.clone()),
             Set(key, value, expire, expire_unit) => {
                 KV_STORE.set(key.clone(), value.clone(), expire.clone() , expire_unit.clone())
@@ -145,8 +152,8 @@ impl Handler<'_> {
             Type(key) => {
                 KV_STORE.type_of(key)
                     .or_else(|| STREAM_STORE.type_of(key))
-                    .map(|type_of| encode_string(type_of.as_str()))
-                    .unwrap_or_else(|| encode_string("none"))
+                    .map(|type_of| encode_str(type_of.as_str()))
+                    .unwrap_or_else(|| encode_str("none"))
             },
             RPush(list_name, values) => KV_STORE.add_to_list(list_name.clone(), values.clone()),
             LPush(list_name, values) => KV_STORE.add_to_list_left(list_name.clone(), values.clone()),
@@ -158,14 +165,14 @@ impl Handler<'_> {
             XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
             XRead(timeout, map) => STREAM_STORE.get_xread(map.clone(), timeout.clone()),
             Multi => {
-                encode_string(OK)
+                encode_str(OK)
             },
             Discard(tx_context) => {
                 if  { tx_context.borrow().is_active } {
                     let mut tx_context_borrowed = tx_context.borrow_mut();
                     tx_context_borrowed.is_active = false;
                     tx_context_borrowed.store.clear();
-                    encode_string(OK)
+                    encode_str(OK)
                 } else {
                     encode_error(ERROR_DISCARD_WITHOUT_MULTI)
                 }
@@ -186,8 +193,9 @@ impl Handler<'_> {
                     encode_error(ERROR_EXEC_WITHOUT_MULTI)
                 }
             },
-            Queued => crate::encode_string("QUEUED"),
-            Null => crate::encode_string("Command not recognized"),
+            Queued => crate::encode_str("QUEUED"),
+            Info(header) => get_info(header.clone()),
+            Null => crate::encode_str("Command not recognized"),
         }
     }
 

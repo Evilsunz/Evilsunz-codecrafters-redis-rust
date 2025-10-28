@@ -1,4 +1,4 @@
-use crate::{encode_error, encode_int, encode_null, encode_string, encode_value, encode_vec, type_of, RespArray, RespNull, RespString, TXContext};
+use crate::{encode_error, encode_int, encode_null, encode_str, encode_value, encode_vec, type_of, RespArray, RespNull, RespString, TXContext};
 use resp::{encode, Value};
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
@@ -185,13 +185,13 @@ impl KeyValueStore {
                     expire.insert(key.clone(), expire_time);
                 }
                 Err(err_msg) => {
-                    return crate::encode_string(&err_msg);
+                    return crate::encode_str(&err_msg);
                 }
             }
         }
         let mut store = self.store.lock().unwrap();
         store.insert(key, value);
-        crate::encode_string(OK)
+        crate::encode_str(OK)
     }
 
     fn calculate_expiration_time(
@@ -232,7 +232,7 @@ impl KeyValueStore {
             }
         }
         match store.get(key) {
-            Some(value) => encode_string(value),
+            Some(value) => encode_str(value),
             None => encode(&Value::Null),
         }
     }

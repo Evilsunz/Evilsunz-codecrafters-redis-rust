@@ -1,6 +1,7 @@
 mod handler;
 mod key_value_store;
 mod stream_store;
+mod replication;
 
 use std::any::type_name;
 use anyhow::{Context, Result, bail};
@@ -116,8 +117,12 @@ pub fn encode_null() -> Vec<u8> {
     encode_value(RespNull)
 }
 
-pub fn encode_string(s: &str) -> Vec<u8> {
+pub fn encode_str(s: &str) -> Vec<u8> {
     encode_value(RespString(String::from(s)))
+}
+
+pub fn encode_string(s: String) -> Vec<u8> {
+    encode_value(RespString(s))
 }
 
 pub fn encode_bulk_string(s: &str) -> Vec<u8> {
