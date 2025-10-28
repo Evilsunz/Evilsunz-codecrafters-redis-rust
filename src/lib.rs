@@ -8,6 +8,8 @@ use anyhow::{Context, Result, bail};
 use std::io::BufReader;
 use resp::{encode, Decoder, Value};
 pub use crate::handler::Handler;
+use rand::{rng, Rng};
+use rand::distr::Alphanumeric;
 
 #[derive(Debug)]
 pub struct TXContext {
@@ -172,4 +174,12 @@ pub fn encode_vec_of_value(v: Vec<Value>) -> Vec<u8> {
 
 fn type_of<T>(_: T) -> &'static str {
     type_name::<T>()
+}
+
+pub fn generate_master_repl_id() -> String{
+    rng()
+        .sample_iter(&Alphanumeric)
+        .take(30)
+        .map(|x| x as char)
+        .collect()
 }
