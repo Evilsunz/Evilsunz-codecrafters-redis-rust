@@ -15,6 +15,30 @@ pub struct TXContext {
     pub store: Vec<Vec<String>>
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplicaInstance {
+    pub is_replica: bool,
+    pub master_ip: String,
+}
+
+impl ReplicaInstance {
+    pub fn create_replica(master_ip: String) -> Self {
+        ReplicaInstance {
+            is_replica: true,
+            master_ip,
+        }
+    }
+}
+
+impl Default for ReplicaInstance {
+     fn default() -> Self {
+        ReplicaInstance {
+            is_replica: false,
+            master_ip: String::new(),
+        }
+    }
+}
+
 impl Default for TXContext {
     fn default() -> Self {
         TXContext {

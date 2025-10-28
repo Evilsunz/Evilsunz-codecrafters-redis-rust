@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
-use crate::{decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, TXContext};
+use crate::{decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, ReplicaInstance, TXContext};
 use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
@@ -31,7 +31,7 @@ pub enum Handler<'a> {
     Incr(String),
     Queued,
     //Replication
-    Info(String),
+    Info(String, ReplicaInstance),
     Null,
 }
 
@@ -67,7 +67,7 @@ const ERROR_DISCARD_WITHOUT_MULTI: &str = "ERR DISCARD without MULTI";
 const BLOCK: &str = "block";
 
 impl Handler<'_> {
-    pub fn from_command(vector: Vec<String>, tx_context: &mut TXContext) -> Handler {
+    pub fn from_command<'a>(vector: Vec<String>, tx_context: &'a mut TXContext, ri: &mut ReplicaInstance) -> Handler<'a> {
         if tx_context.is_active &&
             !vector.first().map(|s| s.as_str()).unwrap_or("").eq(EXEC) &&
             !vector.first().map(|s| s.as_str()).unwrap_or("").eq(DISCARD) {
@@ -135,7 +135,10 @@ impl Handler<'_> {
                 let end = values.get(1).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
                 LRange(list_name, start, end)
             },
-            Some(INFO) => Self::parse_single_arg(&vector).map(Info).unwrap_or(Null),
+            Some(INFO) => {
+                let arg =Self::parse_single_arg(&vector).unwrap_or_default();
+                Info(arg, ri.clone())
+            },
             _ => Null,
         }
     }
@@ -185,7 +188,7 @@ impl Handler<'_> {
                     let mut final_output: Vec<Value> = vec!();
                     for command in tx_context_borrowed.store.iter() {
                         println!("Executing command: {:?}", command);
-                        let mut output = Handler::from_command(command.clone() , &mut TXContext::default()).process_command();
+                        let mut output = Handler::from_command(command.clone() , &mut TXContext::default(), &mut ReplicaInstance::default()).process_command();
                         final_output.push(decode_to_value(output));
                     }
                     encode_vec_of_value(final_output)
@@ -194,7 +197,7 @@ impl Handler<'_> {
                 }
             },
             Queued => crate::encode_str("QUEUED"),
-            Info(header) => get_info(header.clone()),
+            Info(header,ri) => get_info(header.clone(), ri.clone()),
             Null => crate::encode_str("Command not recognized"),
         }
     }

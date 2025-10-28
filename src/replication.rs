@@ -1,4 +1,4 @@
-use crate::{encode_str, encode_string};
+use crate::{encode_str, encode_string, ReplicaInstance};
 
 #[derive(Debug, Clone)]
 pub struct ReplicationInfo{
@@ -6,9 +6,15 @@ pub struct ReplicationInfo{
 }
 
 impl ReplicationInfo {
-    pub fn new() -> ReplicationInfo {
+    pub fn master() -> ReplicationInfo {
         ReplicationInfo {
             role: String::from("master")
+        }
+    }
+
+    pub fn replica() -> ReplicationInfo {
+        ReplicationInfo {
+            role: String::from("slave")
         }
     }
 
@@ -18,6 +24,10 @@ impl ReplicationInfo {
     
 }
 
-pub fn get_info(header: String) -> Vec<u8>{
-    encode_string(ReplicationInfo::new().as_string())
+pub fn get_info(header: String, ri : ReplicaInstance) -> Vec<u8>{
+    if ri.is_replica {
+        encode_string(ReplicationInfo::replica().as_string())
+    } else {
+        encode_string(ReplicationInfo::master().as_string())
+    }
 }
