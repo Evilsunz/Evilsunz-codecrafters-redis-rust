@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -32,6 +32,7 @@ pub enum Handler<'a> {
     Queued,
     //Replication
     Info(String, ReplicaInstance),
+    ReplConf(String, String),
     Null,
 }
 
@@ -57,6 +58,7 @@ const EXEC: &str = "EXEC";
 const DISCARD: &str = "DISCARD";
 //replication
 const INFO: &str = "INFO";
+const REPLCONF: &str = "REPLCONF";
 //misc
 const OK: &'static str = "OK";
 
@@ -139,6 +141,10 @@ impl Handler<'_> {
                 let arg =Self::parse_single_arg(&vector).unwrap_or_default();
                 Info(arg, ri.clone())
             },
+            Some(REPLCONF) => {
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                ReplConf(arg1,arg2)
+            },
             _ => Null,
         }
     }
@@ -198,6 +204,7 @@ impl Handler<'_> {
             },
             Queued => crate::encode_str("QUEUED"),
             Info(header,ri) => get_info(header.clone(), ri.clone()),
+            ReplConf(arg1,arg2) => encode_str("OK"),
             Null => crate::encode_str("Command not recognized"),
         }
     }

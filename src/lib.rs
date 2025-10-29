@@ -63,14 +63,14 @@ impl ReplicaInstance {
             stream.write_all(&repl_conf);
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
-            println!("Received repl 1 response: {:?}", decode_slice_to_value(&buffer));
+            println!("Received REPL 1 response: {:?}", decode_slice_to_value(&buffer));
             let repl_conf = encode_vec(vec!(REPL_CONF2_1.to_string(), REPL_CONF2_2.to_string(), REPL_CONF2_3.to_string()));
             stream.write_all(&repl_conf);
             let repl_conf = encode_vec(vec!(PSYNC1.to_string(), PSYNC2.to_string(), PSYNC3.to_string()));
             stream.write_all(&repl_conf);
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
-            println!("Received repl 2 response: {:?}", decode_slice_to_value(&buffer));
+            println!("Received PSYNC response: {:?}", decode_slice_to_value(&buffer));
         }
     }
 }
