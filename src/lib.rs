@@ -5,8 +5,10 @@ mod replication;
 
 use std::any::type_name;
 use anyhow::{Context, Result, bail};
-use std::io::{BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::thread;
+use std::time::Duration;
 use resp::{encode, Decoder, Value};
 pub use crate::handler::Handler;
 use rand::{rng, Rng};
@@ -66,7 +68,7 @@ impl ReplicaInstance {
         format!("role:{} master_replid:{} master_repl_offset:{}", self.role, self.master_replid, self.master_repl_offset)
     }
 
-    pub fn master_handshake(&self) {
+    pub fn connect_to_master(&self) {
         if self.is_replica {
             let mut stream = TcpStream::connect(format!("{}:{}", self.master_ip, self.master_port)).unwrap();
             let ping = encode_vec(vec!(PING.to_string()));
@@ -86,8 +88,39 @@ impl ReplicaInstance {
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
             println!("Received PSYNC response: {:?}", decode_slice_to_value(&buffer));
+            let mut buffer = [0; 512];
+            stream.read(&mut buffer).unwrap();
+            println!("Received FULLRESYNC: {:?}", String::from_utf8_lossy(&buffer));
+            let mut buffer = [0; 512];
+            stream.read(&mut buffer).unwrap();
+            println!("Received RDB: {:?}", String::from_utf8_lossy(&buffer));
+            loop{
+                let mut buffer = [0; 512];
+                let size =stream.read(&mut buffer).unwrap();
+                xxxx(&mut buffer).iter().for_each(|x| {
+                    let decoded = decode_resp_array(x).unwrap();
+                    Handler::repl_from_command(decoded).process_command();
+                }
+                );
+            }
         }
     }
+}
+
+pub fn xxxx(buffer: &mut [u8]) -> Vec<Vec<u8>>{
+    let mut reader = BufReader::new(buffer.as_ref());
+    let mut vector:Vec<u8> = vec!();
+    reader.read_until(b'\0', &mut vector);
+    let new_vector = vector[..vector.len()-1].to_vec();
+    let vec: Vec<Vec<u8>> = new_vector.split(|x| x.eq(&b'*'))
+        .filter(|x| !x.is_empty())
+        .map(|x| {
+            let mut vec:Vec<u8> = vec!(b'*');
+            vec.splice(1.., x.iter().cloned());
+            vec
+        }).collect();
+    vec.iter().for_each(|x| println!(" We have !!!!! {:?}",decode_resp_array(&x[..x.len()])));
+    vec
 }
 
 impl Default for ReplicaInstance {

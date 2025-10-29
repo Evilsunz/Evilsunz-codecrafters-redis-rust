@@ -51,12 +51,19 @@ fn main() {
         .replicaof
         .map(|s| ReplicaInstance::create_replica(s, args.port))
         .unwrap_or_else(|| ReplicaInstance::default());
-    ri.master_handshake();
+    let ri2 = ri.clone();
+    if ri.is_replica {
+        thread::spawn(move || {
+            println!("for repl thread");
+            ri2.connect_to_master();
+        });
+    }
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 let ri_clone = ri.clone();
                 thread::spawn(move || {
+                    println!("New connection");
                     handle_stream(stream.try_clone().unwrap(), ri_clone);
                 });
             }

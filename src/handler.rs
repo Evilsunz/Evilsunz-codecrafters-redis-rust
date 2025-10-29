@@ -164,6 +164,17 @@ impl Handler<'_> {
         }
     }
 
+    pub fn repl_from_command(vector: Vec<String>) -> Handler<'static> {
+        match vector.first().map(|s| s.as_str()) {
+            Some(SET) => Self::parse_four_args(&vector)
+                .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
+                .unwrap_or(Null),
+            Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
+            _ => Null
+        }
+    }
+
+
     pub fn process_command(&self) -> Vec<u8> {
         match self {
             Ping => crate::encode_str("PONG"),
