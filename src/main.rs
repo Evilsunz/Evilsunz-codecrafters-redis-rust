@@ -22,11 +22,10 @@ fn main() {
         IpAddr::from_str("127.0.0.1").unwrap(),
         args.port,
     )).unwrap();
-
     let ri = args.replicaof
         .map(|s| ReplicaInstance::create_replica(s))
         .unwrap_or_else(|| {ReplicaInstance::default()});
-
+    ri.master_handshake();
     for stream in listener.incoming() {
         match stream {
             Ok(stream) =>{

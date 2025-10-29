@@ -5,7 +5,8 @@ mod replication;
 
 use std::any::type_name;
 use anyhow::{Context, Result, bail};
-use std::io::BufReader;
+use std::io::{BufReader, Write};
+use std::net::TcpStream;
 use resp::{encode, Decoder, Value};
 pub use crate::handler::Handler;
 use rand::{rng, Rng};
@@ -21,13 +22,26 @@ pub struct TXContext {
 pub struct ReplicaInstance {
     pub is_replica: bool,
     pub master_ip: String,
+    pub master_port: u32,
 }
 
 impl ReplicaInstance {
     pub fn create_replica(master_ip: String) -> Self {
+        println!("Replica of {}", master_ip);
+        let ( master_ip ,master_port) = master_ip.split_at(master_ip.find(' ').unwrap());
+        let master_port = master_port[1..].parse::<u32>().unwrap();
         ReplicaInstance {
             is_replica: true,
-            master_ip,
+            master_ip: master_ip.to_string(),
+            master_port,
+        }
+    }
+
+    pub fn master_handshake(&self) {
+        if self.is_replica {
+            let mut stream = TcpStream::connect(format!("{}:{}", self.master_ip, self.master_port)).unwrap();
+            let ping = encode_vec(vec!("PING".to_string()));
+            stream.write_all(&ping);
         }
     }
 }
@@ -37,6 +51,7 @@ impl Default for ReplicaInstance {
         ReplicaInstance {
             is_replica: false,
             master_ip: String::new(),
+            master_port: 0,
         }
     }
 }
