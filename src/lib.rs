@@ -12,11 +12,17 @@ pub use crate::handler::Handler;
 use rand::{rng, Rng};
 use rand::distr::Alphanumeric;
 
+const PING: &str = "PING";
 const REPL_CONF1_1: &str = "REPLCONF";
 const REPL_CONF1_2: &str = "listening-port";
 const REPL_CONF2_1: &str = "REPLCONF";
 const REPL_CONF2_2: &str = "capa";
 const REPL_CONF2_3: &str = "psync2";
+const PSYNC1: &str = "PSYNC";
+const PSYNC2: &str = "?";
+const PSYNC3: &str = "-1";
+
+
 
 #[derive(Debug)]
 pub struct TXContext {
@@ -48,7 +54,7 @@ impl ReplicaInstance {
     pub fn master_handshake(&self) {
         if self.is_replica {
             let mut stream = TcpStream::connect(format!("{}:{}", self.master_ip, self.master_port)).unwrap();
-            let ping = encode_vec(vec!("PING".to_string()));
+            let ping = encode_vec(vec!(PING.to_string()));
             stream.write_all(&ping);
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
@@ -60,9 +66,11 @@ impl ReplicaInstance {
             println!("Received repl 1 response: {:?}", decode_slice_to_value(&buffer));
             let repl_conf = encode_vec(vec!(REPL_CONF2_1.to_string(), REPL_CONF2_2.to_string(), REPL_CONF2_3.to_string()));
             stream.write_all(&repl_conf);
-            //let mut buffer = [0; 512];
-            // stream.read(&mut buffer).unwrap();
-            // println!("Received repl 2 response: {:?}", decode_slice_to_value(&buffer));
+            let repl_conf = encode_vec(vec!(PSYNC1.to_string(), PSYNC2.to_string(), PSYNC3.to_string()));
+            stream.write_all(&repl_conf);
+            let mut buffer = [0; 512];
+            stream.read(&mut buffer).unwrap();
+            println!("Received repl 2 response: {:?}", decode_slice_to_value(&buffer));
         }
     }
 }
