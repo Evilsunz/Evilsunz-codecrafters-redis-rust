@@ -30,12 +30,19 @@ pub struct TXContext {
     pub store: Vec<Vec<String>>
 }
 
+// role: String::from("master"),
+// master_replid : generate_master_repl_id(),
+// master_repl_offset: 0
+
 #[derive(Debug, Clone)]
 pub struct ReplicaInstance {
     pub is_replica: bool,
     pub master_ip: String,
     pub master_port: u16,
     pub own_port: u16,
+    role: String,
+    master_replid : String,
+    master_repl_offset: u16
 }
 
 impl ReplicaInstance {
@@ -48,7 +55,14 @@ impl ReplicaInstance {
             master_ip: master_ip.to_string(),
             master_port,
             own_port,
+            role : String::from("slave"),
+            master_replid : String::from("0000000000000000000000000000000000000000"),
+            master_repl_offset: 0
         }
+    }
+
+    pub fn get_info(&self) -> String {
+        format!("role:{} master_replid:{} master_repl_offset:{}", self.role, self.master_replid, self.master_repl_offset)
     }
 
     pub fn master_handshake(&self) {
@@ -82,6 +96,9 @@ impl Default for ReplicaInstance {
             master_ip: String::new(),
             master_port: 0,
             own_port: 0,
+            role : String::from("master"),
+            master_replid : generate_master_repl_id(),
+            master_repl_offset: 0
         }
     }
 }
