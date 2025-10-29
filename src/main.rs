@@ -23,7 +23,7 @@ fn main() {
         args.port,
     )).unwrap();
     let ri = args.replicaof
-        .map(|s| ReplicaInstance::create_replica(s))
+        .map(|s| ReplicaInstance::create_replica(s, args.port))
         .unwrap_or_else(|| {ReplicaInstance::default()});
     ri.master_handshake();
     for stream in listener.incoming() {

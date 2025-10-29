@@ -5,12 +5,18 @@ mod replication;
 
 use std::any::type_name;
 use anyhow::{Context, Result, bail};
-use std::io::{BufReader, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
 use resp::{encode, Decoder, Value};
 pub use crate::handler::Handler;
 use rand::{rng, Rng};
 use rand::distr::Alphanumeric;
+
+const REPL_CONF1_1: &str = "REPLCONF";
+const REPL_CONF1_2: &str = "listening-port";
+const REPL_CONF2_1: &str = "REPLCONF";
+const REPL_CONF2_2: &str = "capa";
+const REPL_CONF2_3: &str = "psync2";
 
 #[derive(Debug)]
 pub struct TXContext {
@@ -22,18 +28,20 @@ pub struct TXContext {
 pub struct ReplicaInstance {
     pub is_replica: bool,
     pub master_ip: String,
-    pub master_port: u32,
+    pub master_port: u16,
+    pub own_port: u16,
 }
 
 impl ReplicaInstance {
-    pub fn create_replica(master_ip: String) -> Self {
+    pub fn create_replica(master_ip: String, own_port: u16) -> Self {
         println!("Replica of {}", master_ip);
         let ( master_ip ,master_port) = master_ip.split_at(master_ip.find(' ').unwrap());
-        let master_port = master_port[1..].parse::<u32>().unwrap();
+        let master_port = master_port[1..].parse::<u16>().unwrap();
         ReplicaInstance {
             is_replica: true,
             master_ip: master_ip.to_string(),
             master_port,
+            own_port,
         }
     }
 
@@ -42,6 +50,19 @@ impl ReplicaInstance {
             let mut stream = TcpStream::connect(format!("{}:{}", self.master_ip, self.master_port)).unwrap();
             let ping = encode_vec(vec!("PING".to_string()));
             stream.write_all(&ping);
+            let mut buffer = [0; 512];
+            stream.read(&mut buffer).unwrap();
+            println!("Received ping response: {:?}", decode_slice_to_value(&buffer));
+            let repl_conf = encode_vec(vec!(REPL_CONF1_1.to_string(), REPL_CONF1_2.to_string(), self.own_port.to_string()));
+            stream.write_all(&repl_conf);
+            let mut buffer = [0; 512];
+            stream.read(&mut buffer).unwrap();
+            println!("Received repl 1 response: {:?}", decode_slice_to_value(&buffer));
+            let repl_conf = encode_vec(vec!(REPL_CONF2_1.to_string(), REPL_CONF2_2.to_string(), REPL_CONF2_3.to_string()));
+            stream.write_all(&repl_conf);
+            let mut buffer = [0; 512];
+            stream.read(&mut buffer).unwrap();
+            println!("Received repl 2 response: {:?}", decode_slice_to_value(&buffer));
         }
     }
 }
@@ -52,6 +73,7 @@ impl Default for ReplicaInstance {
             is_replica: false,
             master_ip: String::new(),
             master_port: 0,
+            own_port: 0,
         }
     }
 }
@@ -75,7 +97,11 @@ fn value_to_string(value: &Value) -> String {
 }
 
 pub fn decode_to_value(vec : Vec<u8>) -> Value {
-    let mut decoder = Decoder::new(BufReader::new(vec.as_slice()));
+    decode_slice_to_value(&vec)
+}
+
+pub fn decode_slice_to_value(slice : &[u8]) -> Value {
+    let mut decoder = Decoder::new(BufReader::new(slice));
     decoder.decode().unwrap()
 }
 
