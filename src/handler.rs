@@ -5,6 +5,7 @@ use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPo
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
+use std::fmt;
 use std::fmt::format;
 use resp::Value;
 use crate::replication::{get_info, psync};
@@ -69,6 +70,14 @@ const ERROR_DISCARD_WITHOUT_MULTI: &str = "ERR DISCARD without MULTI";
 
 
 const BLOCK: &str = "block";
+
+impl fmt::Display for Handler<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+        // or, alternatively:
+        // fmt::Debug::fmt(self, f)
+    }
+}
 
 impl Handler<'_> {
     pub fn from_command<'a>(vector: Vec<String>, tx_context: &'a mut TXContext, ri: &mut ReplicaInstance) -> Handler<'a> {

@@ -1,9 +1,11 @@
+use std::any::Any;
 use clap::Parser;
-use codecrafters_redis::{decode_resp_array, encode_str, Handler, ReplicaInstance, TXContext};
+use codecrafters_redis::{decode_resp_array, encode_string, get_rdb_file, Handler, ReplicaInstance, TXContext};
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
-use std::thread;
+use std::{mem, thread};
+use std::fmt::format;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -16,6 +18,7 @@ struct Args {
 }
 
 fn main() {
+    println!("{:?}" , Handler::Queued.to_string());
     let args = Args::parse();
     println!("{:?}", args);
     let mut listener = TcpListener::bind(SocketAddr::new(
@@ -52,9 +55,18 @@ fn main() {
                 );
             });
             println!("Decoded +++++ {:?}", decoded_command);
+            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri);
+            let handler_name = handler.to_string();
             let response =
-                Handler::from_command(decoded_command, &mut tx_context, &mut ri).process_command();
+                handler.process_command();
             stream.write_all(&response).unwrap();
+            if handler_name.starts_with("PSync") {
+                println!(" +++++++++++ Received PSync command");
+                let rdb = get_rdb_file();
+                stream.write_all(format!("${}\r\n",rdb.len()).as_bytes()).unwrap();
+                stream.write_all(&rdb).unwrap()
+            }
         }
     }
+
 }

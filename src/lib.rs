@@ -11,6 +11,7 @@ use resp::{encode, Decoder, Value};
 pub use crate::handler::Handler;
 use rand::{rng, Rng};
 use rand::distr::Alphanumeric;
+pub use crate::replication::get_rdb_file;
 
 const PING: &str = "PING";
 const REPL_CONF1_1: &str = "REPLCONF";
@@ -24,7 +25,7 @@ const PSYNC3: &str = "-1";
 
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TXContext {
     pub is_active: bool,
     pub store: Vec<Vec<String>>
@@ -34,7 +35,7 @@ pub struct TXContext {
 // master_replid : generate_master_repl_id(),
 // master_repl_offset: 0
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,Eq,PartialEq)]
 pub struct ReplicaInstance {
     pub is_replica: bool,
     pub master_ip: String,
@@ -160,6 +161,7 @@ pub struct RespArrayOfValueBulk(pub Vec<u8>);
 pub struct RespString(pub String);
 pub struct RespBulkString(pub String);
 pub struct RespError(pub String);
+pub struct RespBulkBuf(pub Vec<u8>);
 
 
 impl Into<Value> for RespNull {
@@ -183,6 +185,12 @@ impl Into<Value> for RespBulkString {
 impl Into<Value> for RespError {
     fn into(self) -> Value {
         Value::Error(self.0)
+    }
+}
+
+impl Into<Value> for RespBulkBuf {
+    fn into(self) -> Value {
+        Value::BufBulk(self.0)
     }
 }
 
@@ -237,6 +245,9 @@ pub fn encode_vec_of_value(v: Vec<Value>) -> Vec<u8> {
     encode_value(RespArrayOfValue(v))
 }
 
+pub fn encode_buf_bulk(v: Vec<u8>) -> Vec<u8> {
+    encode_value(RespBulkBuf(v))
+}
 
 fn type_of<T>(_: T) -> &'static str {
     type_name::<T>()
