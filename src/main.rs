@@ -77,12 +77,13 @@ fn main() {
                     String::from_utf8_lossy(&buffer)
                 );
             });
+            let command = decoded_command.get(0).unwrap().clone();
             println!("Decoded +++++ {:?}", decoded_command);
             let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri);
             let handler_name = handler.to_string();
             let response = handler.process_command();
             stream.write_all(&response).unwrap();
-            if (!ri.is_replica){
+            if (!ri.is_replica && command.eq("SET")){
                 REPLICA_STORE
                     .notifiers
                     .lock()
