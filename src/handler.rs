@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::fmt;
 use std::fmt::format;
 use resp::Value;
-use crate::replication::{get_info, psync};
+use crate::replication::{get_info, psync, repl_conf};
 
 #[derive(Debug)]
 pub enum Handler<'a> {
@@ -33,7 +33,7 @@ pub enum Handler<'a> {
     Queued,
     //Replication
     Info(String, ReplicaInstance),
-    ReplConf(String, String),
+    ReplConf(String, String, ReplicaInstance),
     PSync(String, String, ReplicaInstance),
     Null,
 }
@@ -154,7 +154,7 @@ impl Handler<'_> {
             },
             Some(REPLCONF) => {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
-                ReplConf(arg1,arg2)
+                ReplConf(arg1,arg2, ri.clone())
             },
             Some(PSYNC) => {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
@@ -164,12 +164,16 @@ impl Handler<'_> {
         }
     }
 
-    pub fn repl_from_command(vector: Vec<String>) -> Handler<'static> {
+    pub fn repl_from_command(vector: Vec<String>, ri: &mut ReplicaInstance) -> Handler<'static> {
         match vector.first().map(|s| s.as_str()) {
             Some(SET) => Self::parse_four_args(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
                 .unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
+            Some(REPLCONF) => {
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                ReplConf(arg1,arg2, ri.clone())
+            },
             _ => Null
         }
     }
@@ -230,7 +234,7 @@ impl Handler<'_> {
             },
             Queued => crate::encode_str("QUEUED"),
             Info(header,ri) => get_info(header.clone(), ri.clone()),
-            ReplConf(arg1,arg2) => encode_str("OK"),
+            ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),
             PSync(arg1,arg2, ri) => psync(arg1.clone(), arg2.clone(), ri.clone()),
             Null => crate::encode_str("Command not recognized"),
         }

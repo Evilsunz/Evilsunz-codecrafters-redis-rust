@@ -51,7 +51,7 @@ fn main() {
         .replicaof
         .map(|s| ReplicaInstance::create_replica(s, args.port))
         .unwrap_or_else(|| ReplicaInstance::default());
-    let ri2 = ri.clone();
+    let mut ri2 = ri.clone();
     if ri.is_replica {
         thread::spawn(move || {
             println!("for repl thread");

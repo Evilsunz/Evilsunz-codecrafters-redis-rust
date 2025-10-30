@@ -26,6 +26,8 @@ const PSYNC1: &str = "PSYNC";
 const PSYNC2: &str = "?";
 const PSYNC3: &str = "-1";
 
+const BUFFER_SIZE: usize = 512;
+const RDB_HEADER_SIZE: usize = 88;
 
 
 #[derive(Debug, Clone)]
@@ -69,83 +71,157 @@ impl ReplicaInstance {
         format!("role:{} master_replid:{} master_repl_offset:{}", self.role, self.master_replid, self.master_repl_offset)
     }
 
-    pub fn connect_to_master(&self) {
-        if self.is_replica {
-            let mut stream = TcpStream::connect(format!("{}:{}", self.master_ip, self.master_port)).unwrap();
-            let ping = encode_vec(vec!(PING.to_string()));
-            stream.write_all(&ping);
-            let mut buffer = [0; 512];
-            stream.read(&mut buffer).unwrap();
-            println!("Received ping response: {:?}", decode_slice_to_value(&buffer));
-            let repl_conf = encode_vec(vec!(REPL_CONF1_1.to_string(), REPL_CONF1_2.to_string(), self.own_port.to_string()));
-            stream.write_all(&repl_conf);
-            let mut buffer = [0; 512];
-            stream.read(&mut buffer).unwrap();
-            println!("Received REPL 1 response: {:?}", decode_slice_to_value(&buffer));
-            let repl_conf = encode_vec(vec!(REPL_CONF2_1.to_string(), REPL_CONF2_2.to_string(), REPL_CONF2_3.to_string()));
-            stream.write_all(&repl_conf);
-            let repl_conf = encode_vec(vec!(PSYNC1.to_string(), PSYNC2.to_string(), PSYNC3.to_string()));
-            stream.write_all(&repl_conf);
-            let mut buffer = [0; 512];
-            stream.read(&mut buffer).unwrap();
-            println!("Received PSYNC response: {:?}", decode_slice_to_value(&buffer));
-            // let mut buffer = [0; 512];
-            // stream.read(&mut buffer).unwrap();
-            // println!("Received FULLRESYNC: {:?}", String::from_utf8_lossy(&buffer));
-            read_fullresync(stream.try_clone().unwrap());
-            //read_rdb(stream.try_clone().unwrap());
-            // let mut buffer = [0; 512];
-            // stream.read(&mut buffer).unwrap();
-            // println!("Received RDB: {:?}", String::from_utf8_lossy(&buffer));
-            loop{
-                let mut buffer = [0; 512];
-                let size =stream.read(&mut buffer).unwrap();
-                xxxx(&mut buffer).iter().for_each(|x| {
-                    let decoded = decode_resp_array(x).unwrap();
-                    Handler::repl_from_command(decoded).process_command();
-                }
-                );
-            }
+    pub fn connect_to_master(&mut self) -> anyhow::Result<()> {
+        if !self.is_replica {
+            return Ok(());
+        }
+
+        let mut stream = TcpStream::connect(format!("{}:{}", self.master_ip, self.master_port))?;
+
+        self.send_ping(&mut stream)?;
+        self.send_replconf_listening_port(&mut stream)?;
+        self.send_replconf_capabilities(&mut stream)?;
+        self.send_psync(&mut stream)?;
+
+        let mut reader = BufReader::new(stream.try_clone()?);
+        self.read_rdb_header(&mut reader)?;
+
+        thread::sleep(Duration::from_secs(1));
+        self.process_replication_stream(reader, &mut stream)?;
+
+        Ok(())
+    }
+
+    fn send_and_receive(&self, stream: &mut TcpStream, command: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+        stream.write_all(&command)?;
+        let mut buffer = [0; BUFFER_SIZE];
+        stream.read(&mut buffer)?;
+        Ok(buffer.to_vec())
+    }
+
+    fn send_ping(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
+        let ping = encode_vec(vec![PING.to_string()]);
+        let response = self.send_and_receive(stream, ping)?;
+        println!("Received ping response: {:?}", decode_slice_to_value(&response));
+        Ok(())
+    }
+
+    fn send_replconf_listening_port(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
+        let repl_conf = encode_vec(vec![
+            REPL_CONF1_1.to_string(),
+            REPL_CONF1_2.to_string(),
+            self.own_port.to_string(),
+        ]);
+        let response = self.send_and_receive(stream, repl_conf)?;
+        println!("Received REPLCONF listening-port response: {:?}", decode_slice_to_value(&response));
+        Ok(())
+    }
+
+    fn send_replconf_capabilities(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
+        let repl_conf = encode_vec(vec![
+            REPL_CONF2_1.to_string(),
+            REPL_CONF2_2.to_string(),
+            REPL_CONF2_3.to_string(),
+        ]);
+        stream.write_all(&repl_conf)?;
+        Ok(())
+    }
+
+    fn send_psync(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
+        let psync = encode_vec(vec![
+            PSYNC1.to_string(),
+            PSYNC2.to_string(),
+            PSYNC3.to_string(),
+        ]);
+        let response = self.send_and_receive(stream, psync)?;
+        println!("Received PSYNC response: {:?}", decode_slice_to_value(&response));
+        Ok(())
+    }
+
+    fn read_rdb_header(&self, reader: &mut BufReader<TcpStream>) -> anyhow::Result<()> {
+        let mut buffer: Vec<u8> = vec![];
+
+        reader.read_until(b'\n', &mut buffer)?;
+        println!("Read: {:?}", String::from_utf8_lossy(&buffer));
+
+        reader.read_until(b'\n', &mut buffer)?;
+        println!("Read: {:?}", String::from_utf8_lossy(&buffer));
+
+        let mut rdb_content = [0; RDB_HEADER_SIZE];
+        reader.read_exact(&mut rdb_content)?;
+        println!("Read RDB content: {:?}", String::from_utf8_lossy(&rdb_content));
+
+        Ok(())
+    }
+
+    fn process_replication_stream(&mut self, mut reader: BufReader<TcpStream>, stream: &mut TcpStream) -> anyhow::Result<()> {
+        loop {
+            let mut buffer = [0; BUFFER_SIZE];
+            reader.read(&mut buffer)?;
+
+            parse_buffer_into_commands(&mut buffer)
+                .iter()
+                .for_each(|command_bytes| {
+                    if let Some(decoded) = decode_resp_array(command_bytes) {
+                        println!("Decoded command: {:?}", decoded);
+                        let mut handler = Handler::repl_from_command(decoded, self);
+                        let result =handler.process_command();
+                        stream.write_all(&result);
+                    }
+                });
         }
     }
 }
 
-pub fn read_fullresync(stream: TcpStream){
-    let mut buffer: Vec<u8> = vec!();;
-    let mut reader = BufReader::new(stream);
-    reader.read_until(b'\n', &mut buffer);
-    println!("Readed {:?}", String::from_utf8_lossy(buffer.as_slice()));
-    reader.read_until(b'\n', &mut buffer);
-    let rdb_len: u16 = ((buffer[1] as u16) << 8) | buffer[2] as u16;
-    println!("Readed {:?}", String::from_utf8_lossy(buffer.as_slice()));
-    let mut new_buffer = [0,160];
-    reader.read_exact( &mut new_buffer);
-    println!("Readed {:?}", String::from_utf8_lossy(new_buffer.as_slice()));
-    println!("Len {:?}", rdb_len);
-}
-
-pub fn read_rdb(stream: TcpStream){
-    let mut buffer: Vec<u8> = vec!();;
-    let mut reader = BufReader::new(stream);
-    reader.read_until(b'\n', &mut buffer);
-    println!("Readed {:?}", String::from_utf8_lossy(buffer.as_slice()));
-    //println!("Len {:?}", rdb_len);
-}
-
-pub fn xxxx(buffer: &mut [u8]) -> Vec<Vec<u8>>{
+pub fn parse_buffer_into_commands(buffer: &mut [u8]) -> Vec<Vec<u8>> {
     let mut reader = BufReader::new(buffer.as_ref());
-    let mut vector:Vec<u8> = vec!();
+    let mut vector: Vec<u8> = vec![];
     reader.read_until(b'\0', &mut vector);
-    let new_vector = vector[..vector.len()-1].to_vec();
-    let vec: Vec<Vec<u8>> = new_vector.split(|x| x.eq(&b'*'))
-        .filter(|x| !x.is_empty())
-        .map(|x| {
-            let mut vec:Vec<u8> = vec!(b'*');
-            vec.splice(1.., x.iter().cloned());
-            vec
-        }).collect();
-    vec.iter().for_each(|x| println!(" We have !!!!! {:?}",decode_resp_array(&x[..x.len()])));
-    vec
+
+    println!("Whole Vector: {}", String::from_utf8_lossy(&vector));
+
+    // Try to parse the entire buffer as a single RESP array
+    if let Some(result) = try_parse_as_resp_array(&vector) {
+        println!(" ++++++ len 1 : {}" ,result.get(0).unwrap().len());
+        println!(" ++++++ len 2 : {}" , vector.len());
+        if (result.get(0).unwrap().len() >= vector.len()){
+            return result;
+        }
+    }
+
+    // If that fails, split by delimiter and parse each part
+    let commands = split_buffer_by_delimiter(&vector);
+
+    // Debug output for each parsed command
+    for command in &commands {
+        println!("Parsed command: {:?}", decode_resp_array(command));
+    }
+
+    commands
+}
+
+fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
+    let decoded = decode_resp_array(buffer);
+    if decoded.is_some(){
+        let entries_count = buffer.iter().filter(|&n| *n == b'*').count();
+        println!(" ++++++ count {}" , entries_count);
+        if entries_count > 2 {
+            return None;
+        }
+    }
+    decode_resp_array(buffer).map(|_| vec![buffer.to_vec()])
+}
+
+fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
+    buffer
+        .split(|byte| byte.eq(&b'*'))
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut command = vec![b'*'];
+            command.extend_from_slice(segment);
+            command
+        })
+        .collect()
 }
 
 impl Default for ReplicaInstance {
@@ -193,7 +269,9 @@ pub fn decode_resp_array(buf: &[u8]) -> Option<Vec<String>> {
     let mut decoder = Decoder::new(BufReader::new(buf));
     let decoded = match decoder.decode() {
         Ok(val) => val,
-        Err(_) => return None,
+        Err(e) => {
+            println!("Error {}" , e);
+            return None},
     };
     match decoded {
         Value::Array(array) => {
