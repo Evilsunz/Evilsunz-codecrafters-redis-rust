@@ -1,14 +1,14 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::format;
 use resp::Value;
-use crate::replication::{get_info, psync, repl_conf};
+use crate::replication::{get_info, psync, repl_conf, wait};
 
 #[derive(Debug)]
 pub enum Handler<'a> {
@@ -35,6 +35,7 @@ pub enum Handler<'a> {
     Info(String, ReplicaInstance),
     ReplConf(String, String, ReplicaInstance),
     PSync(String, String, ReplicaInstance),
+    Wait(u64,u64),
     Null,
 }
 
@@ -62,6 +63,7 @@ const DISCARD: &str = "DISCARD";
 const INFO: &str = "INFO";
 const REPLCONF: &str = "REPLCONF";
 const PSYNC: &str = "PSYNC";
+const WAIT: &str = "WAIT";
 //misc
 const OK: &'static str = "OK";
 
@@ -160,6 +162,10 @@ impl Handler<'_> {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
                 PSync(arg1,arg2, ri.clone())
             },
+            Some(WAIT) => {
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                Wait(arg1.parse().unwrap_or_default(), arg2.parse().unwrap_or_default())
+            },
             _ => Null,
         }
     }
@@ -237,6 +243,7 @@ impl Handler<'_> {
             Info(header,ri) => get_info(header.clone(), ri.clone()),
             ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),
             PSync(arg1,arg2, ri) => psync(arg1.clone(), arg2.clone(), ri.clone()),
+            Wait(arg1,arg2) => wait(arg1, arg2),
             Null => crate::encode_str("Command not recognized"),
         }
     }

@@ -3,11 +3,8 @@ use codecrafters_redis::{
     decode_resp_array, encode_string, generate_master_repl_id, get_rdb_file, Handler,
     ReplicaInstance, TXContext,
 };
-use indexmap::IndexMap;
-use std::any::Any;
 use std::collections::HashMap;
-use std::fmt::format;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
@@ -79,10 +76,7 @@ fn main() {
             let mut buffer = [0; 512];
             let size = stream.read(&mut buffer).unwrap();
             let decoded_command = decode_resp_array(&buffer).unwrap_or_else(|| {
-                panic!(
-                    "Failed to decode command {}",
-                    String::from_utf8_lossy(&buffer)
-                );
+                panic!("Failed to decode command");
             });
             let command = decoded_command.get(0).unwrap().clone();
             println!("Decoded +++++ {:?}", decoded_command);
@@ -97,8 +91,6 @@ fn main() {
                     .unwrap()
                     .iter()
                     .for_each(|(k, v)| {
-                        println!("Sending to {}", k);
-                        println!("Sending payload {}", String::from_utf8_lossy(&buffer[..size]));
                         v.send(Some(buffer[..size].to_vec())).unwrap();
                     });
             }

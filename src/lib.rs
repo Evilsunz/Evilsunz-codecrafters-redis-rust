@@ -14,7 +14,6 @@ pub use crate::handler::Handler;
 use rand::{rng, Rng};
 use rand::distr::Alphanumeric;
 pub use crate::replication::get_rdb_file;
-use crate::stream_store::Stream;
 
 const PING: &str = "PING";
 const REPL_CONF1_1: &str = "REPLCONF";
@@ -35,10 +34,6 @@ pub struct TXContext {
     pub is_active: bool,
     pub store: Vec<Vec<String>>
 }
-
-// role: String::from("master"),
-// master_replid : generate_master_repl_id(),
-// master_repl_offset: 0
 
 #[derive(Debug, Clone,Eq,PartialEq)]
 pub struct ReplicaInstance {
@@ -172,7 +167,8 @@ impl ReplicaInstance {
                             || handler.to_string().starts_with("Set")){
                                 stream.write_all(&result);
                         }
-                        self.bytes_offset += offset;
+                        //todo!(" over assign in the loop ");
+                        self.bytes_offset += command_bytes.len();
                     }
                 });
         }
@@ -182,8 +178,8 @@ impl ReplicaInstance {
         let mut reader = BufReader::new(buffer.as_ref());
         let mut vector: Vec<u8> = vec![];
         reader.read_until(b'\0', &mut vector);
-        let offset = vector.len() -1;
-        println!("Whole Vector: {}", String::from_utf8_lossy(&vector));
+        vector.remove(vector.len() - 1);
+        let offset = vector.len();
         // Try to parse the entire buffer as a single RESP array
         if let Some(result) = try_parse_as_resp_array(&vector) {
             if (result.get(0).unwrap().len() >= vector.len()){
@@ -208,7 +204,6 @@ fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
     let decoded = decode_resp_array(buffer);
     if decoded.is_some(){
         let entries_count = buffer.iter().filter(|&n| *n == b'*').count();
-        println!(" ++++++ count {}" , entries_count);
         if entries_count > 2 {
             return None;
         }
@@ -237,7 +232,6 @@ fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
     if start < buffer.len() {
         result.push(buffer[start..].to_vec());
     }
-    println!(" +++++ Returning {:?}" , result);
     result
 }
 
@@ -287,9 +281,7 @@ pub fn decode_resp_array(buf: &[u8]) -> Option<Vec<String>> {
     let mut decoder = Decoder::new(BufReader::new(buf));
     let decoded = match decoder.decode() {
         Ok(val) => val,
-        Err(e) => {
-            println!("Error {}" , e);
-            return None},
+        Err(e) => return None,
     };
     match decoded {
         Value::Array(array) => {
