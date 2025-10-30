@@ -217,8 +217,6 @@ fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
 }
 
 fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
-    println!("+++++++ split by delimiter ");
-    
     let mut result = Vec::new();
     let mut start = 0;
     
@@ -239,7 +237,7 @@ fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
     if start < buffer.len() {
         result.push(buffer[start..].to_vec());
     }
-    
+    println!(" +++++ Returning {:?}" , result);
     result
 }
 
