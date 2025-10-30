@@ -1,5 +1,5 @@
 use clap::Parser;
-use codecrafters_redis::{decode_resp_array, encode_string, generate_master_repl_id, get_rdb_file, set_send_to_replica, Handler, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
+use codecrafters_redis::{decode_resp_array, encode_string, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -18,6 +18,12 @@ struct Args {
 
     #[arg(short, long)]
     replicaof: Option<String>,
+
+    #[arg(short, long)]
+    dir: Option<String>,
+
+    #[arg(short, long)]
+    dbfilename: Option<String>,
 }
 
 fn main() {
@@ -33,6 +39,19 @@ fn main() {
         .replicaof
         .map(|s| ReplicaInstance::create_replica(s, args.port))
         .unwrap_or_else(|| ReplicaInstance::default());
+    
+    let rdb_settings = match args.dbfilename {
+        Some(dbfilename) => {
+            Some(
+                RdbSettings {
+                    dir: args.dir.unwrap(),
+                    filename: dbfilename.clone(),
+                }
+            )
+        },
+        None => None
+    };
+    
     let mut ri2 = ri.clone();
     if ri.is_replica {
         thread::spawn(move || {
@@ -44,9 +63,9 @@ fn main() {
         match stream {
             Ok(stream) => {
                 let ri_clone = ri.clone();
+                let rdb_clone = rdb_settings.clone();
                 thread::spawn(move || {
-                    println!("New connection");
-                    handle_stream(stream.try_clone().unwrap(), ri_clone);
+                    handle_stream(stream.try_clone().unwrap(), ri_clone, rdb_clone);
                 });
             }
             Err(e) => {
@@ -55,7 +74,17 @@ fn main() {
         }
     }
 
-    fn handle_stream(mut stream: TcpStream, mut ri: ReplicaInstance) {
+    fn handle_stream(mut stream: TcpStream, mut ri: ReplicaInstance, rdb_settings : Option<RdbSettings>) {
+        let rdb_settings_clone = rdb_settings.clone();
+        if rdb_settings.is_some() {
+            if let Ok(rdb_file) = parse_rdb_by_config(&rdb_settings.unwrap().clone()) {
+                for (db_num, database) in rdb_file.databases {
+                    println!("Database {}: {} keys", db_num, database.entries.len());
+                }
+            } else {
+                println!("File not exist + doing nothing");
+            }
+        }
         let mut tx_context = TXContext::default();
         loop {
             let mut buffer = [0; 512];
@@ -65,7 +94,8 @@ fn main() {
             });
             let command = decoded_command.get(0).unwrap().clone();
             println!("Decoded +++++ {:?}", decoded_command);
-            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri);
+            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, rdb_settings_clone.clone());
+            println!("Handling {:?}", handler);
             let handler_name = handler.to_string();
             let response = handler.process_command();
             stream.write_all(&response).unwrap();

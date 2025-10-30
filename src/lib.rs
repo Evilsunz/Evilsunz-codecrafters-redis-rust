@@ -2,6 +2,8 @@ mod handler;
 mod key_value_store;
 mod stream_store;
 mod replication;
+mod rdb_parser;
+mod rdb;
 
 use std::any::type_name;
 use std::collections::HashMap;
@@ -18,6 +20,7 @@ use rand::distr::Alphanumeric;
 use tokio::sync::watch;
 pub use crate::replication::get_rdb_file;
 pub use crate::replication::ReplicaStream;
+pub use crate::rdb_parser::parse_rdb_by_config;
 
 const PING: &str = "PING";
 const REPL_CONF1_1: &str = "REPLCONF";
@@ -37,6 +40,12 @@ pub static REPLICA_STREAMS: LazyLock<Arc<Mutex<Vec<ReplicaStream>>>> = LazyLock:
 pub static SET_OPTS_SEND_TO_REPLICA: LazyLock<Mutex<SendToReplica>> = LazyLock::new(|| Mutex::new(SendToReplica::new()));
 
 pub static REPLICA_STORE: LazyLock<ReplicaStore> = LazyLock::new(|| ReplicaStore::new());
+
+#[derive(Clone, Debug)]
+pub struct RdbSettings{
+    pub dir : String,
+    pub filename : String,
+}
 
 pub struct ReplicaStore {
     pub notifiers: Mutex<HashMap<String, watch::Sender<Option<Vec<u8>>>>>,

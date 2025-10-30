@@ -1,13 +1,14 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
-use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait};
+use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::format;
 use resp::Value;
+use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 
 #[derive(Debug)]
@@ -31,6 +32,7 @@ pub enum Handler<'a> {
     Type(String),
     Incr(String),
     Queued,
+    Config(String, String, RdbSettings),
     //Replication
     Info(String, ReplicaInstance),
     ReplConf(String, String, ReplicaInstance),
@@ -55,6 +57,7 @@ const XADD: &str = "XADD";
 const XRANGE: &str = "XRANGE";
 const XREAD: &str = "XREAD";
 const INCR: &str = "INCR";
+const CONFIG: &str = "CONFIG";
 // Transactions
 const MULTI: &str = "MULTI";
 const EXEC: &str = "EXEC";
@@ -82,7 +85,7 @@ impl fmt::Display for Handler<'_> {
 }
 
 impl Handler<'_> {
-    pub fn from_command<'a>(vector: Vec<String>, tx_context: &'a mut TXContext, ri: &mut ReplicaInstance) -> Handler<'a> {
+    pub fn from_command<'a>(vector: Vec<String>, tx_context: &'a mut TXContext, ri: &mut ReplicaInstance, rdb_settings: Option<RdbSettings>) -> Handler<'a> {
         if tx_context.is_active &&
             !vector.first().map(|s| s.as_str()).unwrap_or("").eq(EXEC) &&
             !vector.first().map(|s| s.as_str()).unwrap_or("").eq(DISCARD) {
@@ -162,6 +165,10 @@ impl Handler<'_> {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
                 PSync(arg1,arg2, ri.clone())
             },
+            Some(CONFIG) => {
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                Config(arg1,arg2, rdb_settings.unwrap())
+            },
             Some(WAIT) => {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
                 Wait(arg1.parse().unwrap_or_default(), arg2.parse().unwrap_or_default())
@@ -231,7 +238,7 @@ impl Handler<'_> {
                     let mut final_output: Vec<Value> = vec!();
                     for command in tx_context_borrowed.store.iter() {
                         println!("Executing command: {:?}", command);
-                        let mut output = Handler::from_command(command.clone() , &mut TXContext::default(), &mut ReplicaInstance::default()).process_command();
+                        let mut output = Handler::from_command(command.clone() , &mut TXContext::default(), &mut ReplicaInstance::default(), None).process_command();
                         final_output.push(decode_to_value(output));
                     }
                     encode_vec_of_value(final_output)
@@ -239,6 +246,7 @@ impl Handler<'_> {
                     encode_error(ERROR_EXEC_WITHOUT_MULTI)
                 }
             },
+            Config(arg1, arg2, rdb_settings) => get_config(arg1.to_string(), arg2.to_string(), rdb_settings.clone()),
             Queued => crate::encode_str("QUEUED"),
             Info(header,ri) => get_info(header.clone(), ri.clone()),
             ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),
