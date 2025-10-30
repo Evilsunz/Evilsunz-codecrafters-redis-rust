@@ -118,7 +118,7 @@ pub fn read_fullresync(stream: TcpStream){
     reader.read_until(b'\n', &mut buffer);
     let rdb_len: u16 = ((buffer[1] as u16) << 8) | buffer[2] as u16;
     println!("Readed {:?}", String::from_utf8_lossy(buffer.as_slice()));
-    let mut new_buffer = [0,88];
+    let mut new_buffer = [0,160];
     reader.read_exact( &mut new_buffer);
     println!("Readed {:?}", String::from_utf8_lossy(new_buffer.as_slice()));
     println!("Len {:?}", rdb_len);
