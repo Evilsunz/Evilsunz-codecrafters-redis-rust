@@ -14,6 +14,7 @@ pub use crate::handler::Handler;
 use rand::{rng, Rng};
 use rand::distr::Alphanumeric;
 pub use crate::replication::get_rdb_file;
+use crate::stream_store::Stream;
 
 const PING: &str = "PING";
 const REPL_CONF1_1: &str = "REPLCONF";
@@ -88,12 +89,14 @@ impl ReplicaInstance {
             let mut buffer = [0; 512];
             stream.read(&mut buffer).unwrap();
             println!("Received PSYNC response: {:?}", decode_slice_to_value(&buffer));
-            let mut buffer = [0; 512];
-            stream.read(&mut buffer).unwrap();
-            println!("Received FULLRESYNC: {:?}", String::from_utf8_lossy(&buffer));
-            let mut buffer = [0; 512];
-            stream.read(&mut buffer).unwrap();
-            println!("Received RDB: {:?}", String::from_utf8_lossy(&buffer));
+            // let mut buffer = [0; 512];
+            // stream.read(&mut buffer).unwrap();
+            // println!("Received FULLRESYNC: {:?}", String::from_utf8_lossy(&buffer));
+            read_fullresync(stream.try_clone().unwrap());
+            //read_rdb(stream.try_clone().unwrap());
+            // let mut buffer = [0; 512];
+            // stream.read(&mut buffer).unwrap();
+            // println!("Received RDB: {:?}", String::from_utf8_lossy(&buffer));
             loop{
                 let mut buffer = [0; 512];
                 let size =stream.read(&mut buffer).unwrap();
@@ -105,6 +108,28 @@ impl ReplicaInstance {
             }
         }
     }
+}
+
+pub fn read_fullresync(stream: TcpStream){
+    let mut buffer: Vec<u8> = vec!();;
+    let mut reader = BufReader::new(stream);
+    reader.read_until(b'\n', &mut buffer);
+    println!("Readed {:?}", String::from_utf8_lossy(buffer.as_slice()));
+    reader.read_until(b'\n', &mut buffer);
+    let rdb_len: u16 = ((buffer[1] as u16) << 8) | buffer[2] as u16;
+    println!("Readed {:?}", String::from_utf8_lossy(buffer.as_slice()));
+    let mut new_buffer = [0,88];
+    reader.read_exact( &mut new_buffer);
+    println!("Readed {:?}", String::from_utf8_lossy(new_buffer.as_slice()));
+    println!("Len {:?}", rdb_len);
+}
+
+pub fn read_rdb(stream: TcpStream){
+    let mut buffer: Vec<u8> = vec!();;
+    let mut reader = BufReader::new(stream);
+    reader.read_until(b'\n', &mut buffer);
+    println!("Readed {:?}", String::from_utf8_lossy(buffer.as_slice()));
+    //println!("Len {:?}", rdb_len);
 }
 
 pub fn xxxx(buffer: &mut [u8]) -> Vec<Vec<u8>>{
