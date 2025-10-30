@@ -4,6 +4,7 @@ mod stream_store;
 mod replication;
 
 use std::any::type_name;
+use std::collections::HashMap;
 use anyhow::{Context, Result, bail};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -14,6 +15,7 @@ use resp::{encode, Decoder, Value};
 pub use crate::handler::Handler;
 use rand::{rng, Rng};
 use rand::distr::Alphanumeric;
+use tokio::sync::watch;
 pub use crate::replication::get_rdb_file;
 pub use crate::replication::ReplicaStream;
 
@@ -31,6 +33,43 @@ const BUFFER_SIZE: usize = 512;
 const RDB_HEADER_SIZE: usize = 88;
 
 pub static REPLICA_STREAMS: LazyLock<Arc<Mutex<Vec<ReplicaStream>>>> = LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
+
+pub static SET_OPTS_SEND_TO_REPLICA: LazyLock<Mutex<SendToReplica>> = LazyLock::new(|| Mutex::new(SendToReplica::new()));
+
+pub static REPLICA_STORE: LazyLock<ReplicaStore> = LazyLock::new(|| ReplicaStore::new());
+
+pub struct ReplicaStore {
+    pub notifiers: Mutex<HashMap<String, watch::Sender<Option<Vec<u8>>>>>,
+}
+
+impl ReplicaStore {
+    fn new() -> Self {
+        Self {
+            notifiers: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+pub fn set_send_to_replica(value: bool) {
+    if let Ok(mut guard) = SET_OPTS_SEND_TO_REPLICA.lock() {
+        guard.send = value;
+    }
+}
+
+pub fn get_send_to_replica() -> bool {
+    SET_OPTS_SEND_TO_REPLICA.lock().unwrap().send
+}
+
+#[derive(Debug, Clone)]
+pub struct SendToReplica {
+    pub send: bool,
+}
+
+impl SendToReplica {
+    pub fn new() -> Self {
+        Self { send: false }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TXContext {

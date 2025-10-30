@@ -1,5 +1,5 @@
 use clap::Parser;
-use codecrafters_redis::{decode_resp_array, encode_string, generate_master_repl_id, get_rdb_file, Handler, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STREAMS};
+use codecrafters_redis::{decode_resp_array, encode_string, generate_master_repl_id, get_rdb_file, set_send_to_replica, Handler, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -7,20 +7,8 @@ use std::str::FromStr;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::{mem, thread};
 use tokio::sync::watch;
-
-pub static REPLICA_STORE: LazyLock<ReplicaStore> = LazyLock::new(|| ReplicaStore::new());
-
-pub struct ReplicaStore {
-    notifiers: Mutex<HashMap<String, watch::Sender<Option<Vec<u8>>>>>,
-}
-
-impl ReplicaStore {
-    fn new() -> Self {
-        Self {
-            notifiers: Mutex::new(HashMap::new()),
-        }
-    }
-}
+use tokio::sync::watch::error::SendError;
+use log::error;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -88,7 +76,14 @@ fn main() {
                     .unwrap()
                     .iter()
                     .for_each(|(k, v)| {
-                        v.send(Some(buffer[..size].to_vec())).unwrap();
+                        let _ = match v.send(Some(buffer[..size].to_vec())) {
+                            Ok(_) => {
+                                set_send_to_replica(true);
+                            }
+                            Err(err) => {
+                                println!(" +++++++ error: {}", err);
+                            }
+                        };
                     });
             }
 
