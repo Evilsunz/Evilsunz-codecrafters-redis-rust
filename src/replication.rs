@@ -1,5 +1,7 @@
 use std::fs;
-use crate::{encode_buf_bulk, encode_int, encode_str, encode_string, encode_vec, generate_master_repl_id, ReplicaInstance};
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
+use crate::{encode_buf_bulk, encode_int, encode_str, encode_string, encode_vec, generate_master_repl_id, ReplicaInstance, REPLICA_STREAMS};
 use base64::prelude::*;
 
 const FULLRESYNC: &str = "+FULLRESYNC";
@@ -15,7 +17,7 @@ pub fn psync(arg1 : String, arg2 : String, ri : ReplicaInstance) -> Vec<u8>{
 
 pub fn wait(arg1 : &u64, arg2 : &u64) -> Vec<u8>{
     // let response = format!("{} {} {}",FULLRESYNC, ri.master_replid , ri.master_repl_offset);
-    encode_int(&(0 as usize))
+    encode_int(&REPLICA_STREAMS.lock().unwrap().len())
 }
 
 pub fn repl_conf(arg1 : String, arg2 : String, ri : ReplicaInstance) -> Vec<u8> {
@@ -28,4 +30,16 @@ pub fn repl_conf(arg1 : String, arg2 : String, ri : ReplicaInstance) -> Vec<u8> 
 pub fn get_rdb_file() -> Vec<u8>{
     let rdb = fs::read_to_string("src/empty.rdb").unwrap();
     BASE64_STANDARD.decode(rdb).unwrap()
+}
+
+pub struct ReplicaStream{
+    pub stream: Arc<Mutex<TcpStream>>
+}
+
+impl ReplicaStream{
+    pub fn new(stream: TcpStream) -> Self {
+        Self {
+            stream: Arc::new(Mutex::new(stream)),
+        }
+    }
 }

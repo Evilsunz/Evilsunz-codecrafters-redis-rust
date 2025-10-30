@@ -1,13 +1,10 @@
 use clap::Parser;
-use codecrafters_redis::{
-    decode_resp_array, encode_string, generate_master_repl_id, get_rdb_file, Handler,
-    ReplicaInstance, TXContext,
-};
+use codecrafters_redis::{decode_resp_array, encode_string, generate_master_repl_id, get_rdb_file, Handler, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STREAMS};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::{mem, thread};
 use tokio::sync::watch;
 
@@ -102,7 +99,7 @@ fn main() {
                     .write_all(format!("${}\r\n", rdb.len()).as_bytes())
                     .unwrap();
                 stream.write_all(&rdb).unwrap();
-
+                REPLICA_STREAMS.lock().unwrap().push(ReplicaStream{stream: Arc::new(Mutex::new(stream.try_clone().unwrap()))});
                 let mut rx = REPLICA_STORE
                     .notifiers
                     .lock()

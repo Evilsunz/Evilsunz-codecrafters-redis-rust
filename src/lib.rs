@@ -7,6 +7,7 @@ use std::any::type_name;
 use anyhow::{Context, Result, bail};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
 use resp::{encode, Decoder, Value};
@@ -14,6 +15,7 @@ pub use crate::handler::Handler;
 use rand::{rng, Rng};
 use rand::distr::Alphanumeric;
 pub use crate::replication::get_rdb_file;
+pub use crate::replication::ReplicaStream;
 
 const PING: &str = "PING";
 const REPL_CONF1_1: &str = "REPLCONF";
@@ -28,6 +30,7 @@ const PSYNC3: &str = "-1";
 const BUFFER_SIZE: usize = 512;
 const RDB_HEADER_SIZE: usize = 88;
 
+pub static REPLICA_STREAMS: LazyLock<Arc<Mutex<Vec<ReplicaStream>>>> = LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
 
 #[derive(Debug, Clone)]
 pub struct TXContext {
