@@ -174,6 +174,7 @@ impl Handler<'_> {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
                 ReplConf(arg1,arg2, ri.clone())
             },
+            Some(PING) => Ping,
             _ => Null
         }
     }

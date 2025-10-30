@@ -48,7 +48,8 @@ pub struct ReplicaInstance {
     pub own_port: u16,
     role: String,
     master_replid : String,
-    master_repl_offset: u16
+    master_repl_offset: u16,
+    bytes_offset: usize
 }
 
 impl ReplicaInstance {
@@ -63,7 +64,8 @@ impl ReplicaInstance {
             own_port,
             role : String::from("slave"),
             master_replid : String::from("0000000000000000000000000000000000000000"),
-            master_repl_offset: 0
+            master_repl_offset: 0,
+            bytes_offset: 0
         }
     }
 
@@ -158,46 +160,48 @@ impl ReplicaInstance {
         loop {
             let mut buffer = [0; BUFFER_SIZE];
             reader.read(&mut buffer)?;
-
-            parse_buffer_into_commands(&mut buffer)
+            let (offset , commands) = self.parse_buffer_into_commands(&mut buffer);
+            commands
                 .iter()
                 .for_each(|command_bytes| {
                     if let Some(decoded) = decode_resp_array(command_bytes) {
                         println!("Decoded command: {:?}", decoded);
                         let mut handler = Handler::repl_from_command(decoded, self);
                         let result =handler.process_command();
-                        stream.write_all(&result);
+                        if !(handler.to_string().starts_with("Ping")
+                            || handler.to_string().starts_with("Set")){
+                                stream.write_all(&result);
+                        }
+                        self.bytes_offset += offset;
                     }
                 });
         }
     }
-}
 
-pub fn parse_buffer_into_commands(buffer: &mut [u8]) -> Vec<Vec<u8>> {
-    let mut reader = BufReader::new(buffer.as_ref());
-    let mut vector: Vec<u8> = vec![];
-    reader.read_until(b'\0', &mut vector);
-
-    println!("Whole Vector: {}", String::from_utf8_lossy(&vector));
-
-    // Try to parse the entire buffer as a single RESP array
-    if let Some(result) = try_parse_as_resp_array(&vector) {
-        println!(" ++++++ len 1 : {}" ,result.get(0).unwrap().len());
-        println!(" ++++++ len 2 : {}" , vector.len());
-        if (result.get(0).unwrap().len() >= vector.len()){
-            return result;
+    pub fn parse_buffer_into_commands(&mut self, buffer: &mut [u8]) -> (usize,  Vec<Vec<u8>> ) {
+        let mut reader = BufReader::new(buffer.as_ref());
+        let mut vector: Vec<u8> = vec![];
+        reader.read_until(b'\0', &mut vector);
+        let offset = vector.len() -1;
+        println!("Whole Vector: {}", String::from_utf8_lossy(&vector));
+        // Try to parse the entire buffer as a single RESP array
+        if let Some(result) = try_parse_as_resp_array(&vector) {
+            if (result.get(0).unwrap().len() >= vector.len()){
+                return (offset, result);
+            }
         }
+
+        // If that fails, split by delimiter and parse each part
+        let commands = split_buffer_by_delimiter(&vector);
+
+        // Debug output for each parsed command
+        for command in &commands {
+            println!("Parsed command: {:?}", decode_resp_array(command));
+        }
+
+        (offset, commands)
     }
 
-    // If that fails, split by delimiter and parse each part
-    let commands = split_buffer_by_delimiter(&vector);
-
-    // Debug output for each parsed command
-    for command in &commands {
-        println!("Parsed command: {:?}", decode_resp_array(command));
-    }
-
-    commands
 }
 
 fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
@@ -214,7 +218,18 @@ fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
 
 fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
     buffer
-        .split(|byte| byte.eq(&b'*'))
+        .split(|byte| {
+            if byte.eq(&b'*') {
+                // Check if next byte is a digit
+                let next_idx = buffer.iter().position(|b| b == byte).map(|i| i + 1);
+                if let Some(idx) = next_idx {
+                    if idx < buffer.len() && buffer[idx].is_ascii_digit() {
+                        return true;
+                    }
+                }
+            }
+            false
+        })
         .filter(|segment| !segment.is_empty())
         .map(|segment| {
             let mut command = vec![b'*'];
@@ -233,7 +248,8 @@ impl Default for ReplicaInstance {
             own_port: 0,
             role : String::from("master"),
             master_replid : generate_master_repl_id(),
-            master_repl_offset: 0
+            master_repl_offset: 0,
+            bytes_offset: 0
         }
     }
 }

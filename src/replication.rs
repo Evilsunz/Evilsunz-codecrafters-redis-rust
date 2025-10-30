@@ -15,7 +15,7 @@ pub fn psync(arg1 : String, arg2 : String, ri : ReplicaInstance) -> Vec<u8>{
 
 pub fn repl_conf(arg1 : String, arg2 : String, ri : ReplicaInstance) -> Vec<u8> {
     if (arg1.eq("GETACK")){
-        return encode_vec(vec!("REPLCONF".to_string(),"ACK".to_string(),"0".to_string()));
+        return encode_vec(vec!("REPLCONF".to_string(), "ACK".to_string(), ri.bytes_offset.to_string()));
     }
     encode_str("OK")
 }
