@@ -218,26 +218,33 @@ fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
 
 fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
     println!("+++++++ split by delimiter ");
-    buffer
-        .split(|byte| {
-            if byte.eq(&b'*') {
-                // Check if next byte is a digit
-                let next_idx = buffer.iter().position(|b| b == byte).map(|i| i + 1);
-                if let Some(idx) = next_idx {
-                    if idx < buffer.len() && buffer[idx].is_ascii_digit() {
-                        return true;
-                    }
+    
+    let mut result = Vec::new();
+    let mut start = 0;
+    
+    for i in 0..buffer.len() {
+        if buffer[i] == b'*' {
+            // Check if next byte is a digit
+            if i + 1 < buffer.len() && buffer[i + 1].is_ascii_digit() {
+                // Found delimiter, add segment if not empty
+                if i > start {
+                    let mut command = vec![b'*'];
+                    command.extend_from_slice(&buffer[start..i]);
+                    result.push(command);
                 }
+                start = i;
             }
-            false
-        })
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| {
-            let mut command = vec![b'*'];
-            command.extend_from_slice(segment);
-            command
-        })
-        .collect()
+        }
+    }
+    
+    // Add remaining segment
+    if start < buffer.len() {
+        let mut command = vec![b'*'];
+        command.extend_from_slice(&buffer[start..]);
+        result.push(command);
+    }
+    
+    result
 }
 
 impl Default for ReplicaInstance {
