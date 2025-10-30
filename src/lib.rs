@@ -217,6 +217,7 @@ fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
 }
 
 fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
+    println!("+++++++ split by delimiter ");
     buffer
         .split(|byte| {
             if byte.eq(&b'*') {
