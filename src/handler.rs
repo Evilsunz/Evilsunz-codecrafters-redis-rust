@@ -1,13 +1,14 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::format;
 use resp::Value;
+use crate::channels::subscribe;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 
@@ -34,6 +35,8 @@ pub enum Handler<'a> {
     Queued,
     Config(String, String, RdbSettings),
     Keys,
+    //Subscribe
+    Subscribe(String),
     //Replication
     Info(String, ReplicaInstance),
     ReplConf(String, String, ReplicaInstance),
@@ -69,6 +72,8 @@ const INFO: &str = "INFO";
 const REPLCONF: &str = "REPLCONF";
 const PSYNC: &str = "PSYNC";
 const WAIT: &str = "WAIT";
+//subscribe
+const SUBSCRIBE: &str = "SUBSCRIBE";
 //misc
 const OK: &'static str = "OK";
 
@@ -111,6 +116,7 @@ impl Handler<'_> {
             Some(LLEN) => Self::parse_single_arg(&vector).map(LLen).unwrap_or(Null),
             Some(TYPE) => Self::parse_single_arg(&vector).map(Type).unwrap_or(Null),
             Some(INCR) => Self::parse_single_arg(&vector).map(Incr).unwrap_or(Null),
+            Some(SUBSCRIBE) => Self::parse_single_arg(&vector).map(Subscribe).unwrap_or(Null),
             Some(XREAD) => {
                 let (timeout , config) = Self::parse_hash_map(&vector);
                 XRead(timeout, config)
@@ -199,6 +205,7 @@ impl Handler<'_> {
             Ping => crate::encode_str("PONG"),
             Echo(str) => crate::encode_str(str),
             Incr(str) => KV_STORE.incr(str.clone()),
+            Subscribe(str) => subscribe(str.clone()),
             Set(key, value, expire, expire_unit) => {
                 KV_STORE.set(key.clone(), value.clone(), expire.clone() , expire_unit.clone())
             }

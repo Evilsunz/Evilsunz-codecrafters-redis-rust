@@ -74,42 +74,57 @@ fn main() {
         }
     }
 
-    fn handle_stream(mut stream: TcpStream, mut ri: ReplicaInstance, rdb_settings : Option<RdbSettings>) {
-        let mut tx_context = TXContext::default();
-        let rdb_settings_clone = rdb_settings.clone();
-        if rdb_settings.is_some() {
-            if let rdb_file = parse_rdb_by_config(&rdb_settings.unwrap().clone()) {
-                if rdb_file.is_ok() {
-                    for (db_num, database) in rdb_file.unwrap().databases {
-                        for entry in database.entries {
-                            let mut vec_command = vec!("SET".to_string());
-                            if entry.0.contains(":expire:"){
-                                let expire = entry.0.split(":expire:").collect::<Vec<&str>>();
 
-                                let start = SystemTime::now();
-                                let since_the_epoch = start
-                                    .duration_since(UNIX_EPOCH)
-                                    .expect("time should go forward");
+    fn load_rdb_data(
+        rdb_settings: Option<RdbSettings>,
+        tx_context: &mut TXContext,
+        ri: &mut ReplicaInstance,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(settings) = rdb_settings {
+            let rdb_file = parse_rdb_by_config(&settings)?;
 
-                                let expire_time = expire[1].parse::<u64>().expect("Failed to parse expiration time");
-                                if std::time::Duration::from_millis(expire_time) > since_the_epoch {
-                                    vec_command.push(expire[0].to_string());
-                                    vec_command.push(entry.1.as_string().unwrap());
-                                    vec_command.push("PX".to_string());
-                                    vec_command.push(expire[1].to_string());
-                                }
-                            }else {
-                                vec_command.push(entry.0);
-                                vec_command.push(entry.1.as_string().unwrap());
-                            }
+            for (_db_num, database) in rdb_file.databases {
+                for (key, value) in database.entries {
+                    let mut vec_command = vec!["SET".to_string()];
 
-                            Handler::from_command(vec_command, &mut tx_context, &mut ri, rdb_settings_clone.clone())
-                                .process_command();
+                    if key.contains(":expire:") {
+                        let parts: Vec<&str> = key.split(":expire:").collect();
+                        let expire_time = parts[1].parse::<u64>()?;
+
+                        let since_the_epoch = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .expect("time should go forward");
+
+                        if std::time::Duration::from_millis(expire_time) > since_the_epoch {
+                            vec_command.push(parts[0].to_string());
+                            vec_command.push(value.as_string().unwrap());
+                            vec_command.push("PX".to_string());
+                            vec_command.push(parts[1].to_string());
+                        } else {
+                            continue; // Skip expired keys
                         }
+                    } else {
+                        vec_command.push(key);
+                        vec_command.push(value.as_string().unwrap());
                     }
+
+                    Handler::from_command(vec_command, tx_context, ri, Some(settings.clone()))
+                        .process_command();
                 }
             }
         }
+        Ok(())
+    }
+
+    fn handle_stream(mut stream: TcpStream, mut ri: ReplicaInstance, rdb_settings: Option<RdbSettings>) {
+        let mut tx_context = TXContext::default();
+        let rdb_settings_clone = rdb_settings.clone();
+
+        // Load RDB data if available
+        if let Err(e) = load_rdb_data(rdb_settings, &mut tx_context, &mut ri) {
+            eprintln!("Failed to load RDB data: {}", e);
+        }
+
         loop {
             let mut buffer = [0; 512];
             let size = stream.read(&mut buffer).unwrap();
@@ -123,7 +138,7 @@ fn main() {
             let handler_name = handler.to_string();
             let response = handler.process_command();
             stream.write_all(&response).unwrap();
-            if (!ri.is_replica && command.eq("SET")){
+            if (!ri.is_replica && command.eq("SET")) {
                 REPLICA_STORE
                     .notifiers
                     .lock()
@@ -140,7 +155,6 @@ fn main() {
                         };
                     });
             }
-
             if handler_name.starts_with("PSync") {
                 println!(" +++++++++++ Received PSync command");
                 let rdb = get_rdb_file();
@@ -148,7 +162,7 @@ fn main() {
                     .write_all(format!("${}\r\n", rdb.len()).as_bytes())
                     .unwrap();
                 stream.write_all(&rdb).unwrap();
-                REPLICA_STREAMS.lock().unwrap().push(ReplicaStream{stream: Arc::new(Mutex::new(stream.try_clone().unwrap()))});
+                REPLICA_STREAMS.lock().unwrap().push(ReplicaStream { stream: Arc::new(Mutex::new(stream.try_clone().unwrap())) });
                 let mut rx = REPLICA_STORE
                     .notifiers
                     .lock()
@@ -157,7 +171,7 @@ fn main() {
                     .or_insert_with(|| watch::channel(None).0)
                     .subscribe();
                 loop {
-                    if rx.has_changed().unwrap(){
+                    if rx.has_changed().unwrap() {
                         if let Some(command) = rx.borrow_and_update().clone() {
                             //println!(" +++++++ Received {}" , String::from_utf8_lossy(&command));
                             stream.write_all(&command).unwrap();
