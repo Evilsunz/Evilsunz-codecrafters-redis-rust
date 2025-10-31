@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -33,6 +33,7 @@ pub enum Handler<'a> {
     Incr(String),
     Queued,
     Config(String, String, RdbSettings),
+    Keys,
     //Replication
     Info(String, ReplicaInstance),
     ReplConf(String, String, ReplicaInstance),
@@ -58,6 +59,7 @@ const XRANGE: &str = "XRANGE";
 const XREAD: &str = "XREAD";
 const INCR: &str = "INCR";
 const CONFIG: &str = "CONFIG";
+const KEYS: &str = "KEYS";
 // Transactions
 const MULTI: &str = "MULTI";
 const EXEC: &str = "EXEC";
@@ -79,8 +81,6 @@ const BLOCK: &str = "block";
 impl fmt::Display for Handler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
-        // or, alternatively:
-        // fmt::Debug::fmt(self, f)
     }
 }
 
@@ -99,6 +99,7 @@ impl Handler<'_> {
                 tx_context.is_active = true;
                 Multi
             },
+            Some(KEYS) => Keys,
             Some(EXEC) => {
                 Exec(RefCell::new(tx_context))
             },
@@ -217,6 +218,7 @@ impl Handler<'_> {
             XAdd(stream_name, id, vec) => STREAM_STORE.add_stream(stream_name.clone(),id,vec.clone()),
             XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
             XRead(timeout, map) => STREAM_STORE.get_xread(map.clone(), timeout.clone()),
+            Keys => KV_STORE.keys(),
             Multi => {
                 encode_str(OK)
             },

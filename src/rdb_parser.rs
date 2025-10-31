@@ -1,6 +1,8 @@
 use std::io::{Read, Result as IoResult, Error, ErrorKind, BufReader};
 use std::collections::HashMap;
 use std::fs;
+use std::fs::DirEntry;
+use std::path::Path;
 use crate::RdbSettings;
 
 /// RDB file parser for Redis database files
@@ -13,38 +15,43 @@ impl<R: Read> RdbParser<R> {
         Self { reader }
     }
 
-    /// Parse the entire RDB file
     pub fn parse(&mut self) -> IoResult<RdbFile> {
         let header = self.read_header()?;
         let mut databases = Vec::new();
         let mut aux_fields = HashMap::new();
+        let mut current_db_number = 0;
+        let mut current_db = Database { entries: HashMap::new() };
 
         loop {
             let op_code = self.read_byte()?;
-
             match op_code {
                 0xFF => {
-                    // End of file
+                    // End of file - save current database if it has entries
+                    if !current_db.entries.is_empty() {
+                        databases.push((current_db_number, current_db));
+                    }
                     let _checksum = self.read_checksum()?;
                     break;
                 }
                 0xFE => {
-                    // Database selector
-                    let db_number = self.read_length()?;
-                    let db = self.read_database()?;
-                    databases.push((db_number, db));
+                    // Database selector - save previous database if it has entries
+                    if !current_db.entries.is_empty() {
+                        databases.push((current_db_number, current_db));
+                    }
+                    current_db_number = self.read_length()?;
+                    current_db = Database { entries: HashMap::new() };
                 }
                 0xFD => {
                     // Expire time in seconds
-                    let expire_seconds = self.read_u32()?;
-                    let key_value = self.read_key_value_pair()?;
-                    // Handle expiry...
+                    let _expire_seconds = self.read_u32()?;
+                    let (key, value) = self.read_key_value_pair()?;
+                    current_db.entries.insert(key, value);
                 }
                 0xFC => {
                     // Expire time in milliseconds
-                    let expire_ms = self.read_u64()?;
-                    let key_value = self.read_key_value_pair()?;
-                    // Handle expiry...
+                    let _expire_ms = self.read_u64()?;
+                    let (key, value) = self.read_key_value_pair()?;
+                    current_db.entries.insert(key, value);
                 }
                 0xFA => {
                     // Auxiliary field
@@ -54,13 +61,15 @@ impl<R: Read> RdbParser<R> {
                 }
                 0xFB => {
                     // Resize DB
-                    let db_size = self.read_length()?;
-                    let expires_size = self.read_length()?;
-                    // Handle resize hint...
+                    let _db_size = self.read_length()?;
+                    let _expires_size = self.read_length()?;
+                    // Continue reading key-value pairs
                 }
                 _ => {
-                    // It's a value type, read key-value pair
-                    return Err(Error::new(ErrorKind::InvalidData, "Unexpected opcode"));
+                    // Value type (0-4), read as key-value pair
+                    let key = self.read_string()?;
+                    let value = self.read_value(op_code)?;
+                    current_db.entries.insert(key, value);
                 }
             }
         }
@@ -72,7 +81,6 @@ impl<R: Read> RdbParser<R> {
         })
     }
 
-    /// Read and validate RDB header
     fn read_header(&mut self) -> IoResult<RdbHeader> {
         let mut magic = [0u8; 5];
         self.reader.read_exact(&mut magic)?;
@@ -94,7 +102,6 @@ impl<R: Read> RdbParser<R> {
         })
     }
 
-    /// Read a database section
     fn read_database(&mut self) -> IoResult<Database> {
         let mut entries = HashMap::new();
 
@@ -113,7 +120,6 @@ impl<R: Read> RdbParser<R> {
         Ok(Database { entries })
     }
 
-    /// Read a key-value pair
     fn read_key_value_pair(&mut self) -> IoResult<(String, RedisValue)> {
         let value_type = self.read_byte()?;
         let key = self.read_string()?;
@@ -122,7 +128,6 @@ impl<R: Read> RdbParser<R> {
         Ok((key, value))
     }
 
-    /// Read a value based on its type
     fn read_value(&mut self, value_type: u8) -> IoResult<RedisValue> {
         match value_type {
             0 => {
@@ -212,7 +217,6 @@ impl<R: Read> RdbParser<R> {
         }
     }
 
-    /// Read a string (with length encoding)
     fn read_string(&mut self) -> IoResult<String> {
         let len = self.read_length()?;
         let mut buffer = vec![0u8; len];
@@ -221,7 +225,6 @@ impl<R: Read> RdbParser<R> {
         Ok(String::from_utf8_lossy(&buffer).to_string())
     }
 
-    /// Read a double (for sorted sets)
     fn read_double(&mut self) -> IoResult<f64> {
         let len = self.read_byte()?;
         match len {
@@ -273,8 +276,6 @@ impl<R: Read> RdbParser<R> {
     }
 }
 
-// Data structures
-
 #[derive(Debug)]
 pub struct RdbFile {
     pub version: u32,
@@ -300,6 +301,43 @@ pub enum RedisValue {
     Set(Vec<String>),
     ZSet(Vec<(String, f64)>),
     Hash(HashMap<String, String>),
+}
+
+impl RedisValue {
+    pub fn as_string(&self) -> Option<String> {
+        match self {
+            RedisValue::String(s) => Some(s.to_string()),
+            _ => None
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&Vec<String>> {
+        match self {
+            RedisValue::List(l) => Some(l),
+            _ => None
+        }
+    }
+
+    pub fn as_set(&self) -> Option<&Vec<String>> {
+        match self {
+            RedisValue::Set(s) => Some(s),
+            _ => None
+        }
+    }
+
+    pub fn as_zset(&self) -> Option<&Vec<(String, f64)>> {
+        match self {
+            RedisValue::ZSet(z) => Some(z),
+            _ => None
+        }
+    }
+
+    pub fn as_hash(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            RedisValue::Hash(h) => Some(h),
+            _ => None
+        }
+    }
 }
 
 pub fn parse_rdb_by_config(rdb_settings : &RdbSettings) -> IoResult<RdbFile> {

@@ -194,6 +194,11 @@ impl KeyValueStore {
         crate::encode_str(OK)
     }
 
+    pub fn keys(&self) -> Vec<u8>{
+        let result = self.store.lock().unwrap().keys().map(|k| k.to_string()).collect::<Vec<String>>();
+        encode_vec(result)
+    }
+    
     fn calculate_expiration_time(
         &self,
         expire_unit: &str,
