@@ -81,7 +81,6 @@ fn main() {
             if let rdb_file = parse_rdb_by_config(&rdb_settings.unwrap().clone()) {
                 if rdb_file.is_ok() {
                     for (db_num, database) in rdb_file.unwrap().databases {
-                        println!("Database {}: {} keys", db_num, database.entries.len());
                         for entry in database.entries {
                             let mut vec_command = vec!("SET".to_string());
                             if entry.0.contains(":expire:"){
@@ -91,18 +90,14 @@ fn main() {
                                 let since_the_epoch = start
                                     .duration_since(UNIX_EPOCH)
                                     .expect("time should go forward");
-                                println!(" +++ Now {:?}", since_the_epoch);
-                                println!(" +++ Expire: {:?}", expire[1].to_string());
 
                                 let expire_time = expire[1].parse::<u64>().expect("Failed to parse expiration time");
                                 if std::time::Duration::from_millis(expire_time) > since_the_epoch {
                                     vec_command.push(expire[0].to_string());
                                     vec_command.push(entry.1.as_string().unwrap());
                                     vec_command.push("PX".to_string());
-                                    vec_command.push(expire[1].to_string());   
+                                    vec_command.push(expire[1].to_string());
                                 }
-
-                                println!("{}", vec_command.join(" "));
                             }else {
                                 vec_command.push(entry.0);
                                 vec_command.push(entry.1.as_string().unwrap());
@@ -110,7 +105,6 @@ fn main() {
 
                             Handler::from_command(vec_command, &mut tx_context, &mut ri, rdb_settings_clone.clone())
                                 .process_command();
-                            // println!("{} : {:?}", entry.0 , entry.1 );
                         }
                     }
                 }
