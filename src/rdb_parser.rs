@@ -43,15 +43,15 @@ impl<R: Read> RdbParser<R> {
                 }
                 0xFD => {
                     // Expire time in seconds
-                    let _expire_seconds = self.read_u32()?;
+                    let expire_seconds = self.read_u32()?;
                     let (key, value) = self.read_key_value_pair()?;
-                    current_db.entries.insert(key, value);
+                    current_db.entries.insert(format!("{}:expire:{}", key, expire_seconds * 1000), value);
                 }
                 0xFC => {
-                    // Expire time in milliseconds
-                    let _expire_ms = self.read_u64()?;
+                    // Expire time in milliseconds 
+                    let expire_ms = self.read_u64()?;
                     let (key, value) = self.read_key_value_pair()?;
-                    current_db.entries.insert(key, value);
+                    current_db.entries.insert(format!("{}:expire:{}", key, expire_ms), value);
                 }
                 0xFA => {
                     // Auxiliary field
