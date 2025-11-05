@@ -11,6 +11,7 @@ use tokio::sync::watch;
 use tokio::sync::watch::error::SendError;
 use log::error;
 use codecrafters_redis::channels::{PubSub, PUBSUB};
+use tokio::runtime::Runtime;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -177,7 +178,17 @@ fn main() {
                     }
                 }
 
-                sub_handler.run_loop(&mut stream);
+                let rt = Runtime::new().unwrap();
+                rt.block_on(async {
+                    match tokio::net::TcpStream::from_std(stream) {
+                        Ok(mut tokio_stream) => {
+                            sub_handler.run_loop_async(&mut tokio_stream).await;
+                        },
+                        Err(e) => {
+                            eprintln!("Failed to convert to tokio stream: {}", e);
+                        }
+                    }
+                });
                 break;
             }
 

@@ -1,11 +1,12 @@
-use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::sync::{Arc, LazyLock, Mutex};
-use indexmap::IndexMap;
+
+use crate::{
+    decode_resp_array, encode_error, encode_int, encode_str, encode_vec, encode_vec_of_value,
+};
 use resp::Value;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{broadcast, watch};
-use crate::{decode_resp_array, encode_error, encode_int, encode_str, encode_vec, encode_vec_of_value};
 
 pub static PUBSUB: LazyLock<PubSub> = LazyLock::new(|| PubSub::new());
 
@@ -28,21 +29,25 @@ impl PubSub {
         }
     }
 
-    pub fn subscribe(&self, client_id: String, channel_name: String) -> (broadcast::Receiver<Message>, usize) {
+    pub fn subscribe(
+        &self,
+        client_id: String,
+        channel_name: String,
+    ) -> (broadcast::Receiver<Message>, usize) {
         let mut channels = self.channels.lock().unwrap();
         let mut subscriptions = self.client_subscriptions.lock().unwrap();
 
-        let client_channels = subscriptions.entry(client_id.clone()).or_insert_with(Vec::new);
+        let client_channels = subscriptions
+            .entry(client_id.clone())
+            .or_insert_with(Vec::new);
         if !client_channels.contains(&channel_name) {
             client_channels.push(channel_name.clone());
         }
 
-        let sender = channels
-            .entry(channel_name.clone())
-            .or_insert_with(|| {
-                println!("Created new channel: {}", channel_name);
-                broadcast::channel(100).0
-            });
+        let sender = channels.entry(channel_name.clone()).or_insert_with(|| {
+            println!("Created new channel: {}", channel_name);
+            broadcast::channel(100).0
+        });
 
         let receiver = sender.subscribe();
         let subscription_count = client_channels.len();
@@ -61,8 +66,10 @@ impl PubSub {
 
             match sender.send(message) {
                 Ok(subscriber_count) => {
-                    println!("Message sent to {} subscribers on channel '{}'",
-                             subscriber_count, channel_name);
+                    println!(
+                        "Message sent to {} subscribers on channel '{}'",
+                        subscriber_count, channel_name
+                    );
                     subscriber_count
                 }
                 Err(_) => {
@@ -108,7 +115,6 @@ impl PubSub {
     }
 }
 
-// Subscription mode handler struct
 pub struct SubscriptionModeHandler {
     client_id: String,
     subscribed_channels: HashMap<String, broadcast::Receiver<Message>>,
@@ -148,17 +154,15 @@ impl SubscriptionModeHandler {
 
     pub fn unsubscribe_from_all(&mut self) -> Vec<Vec<u8>> {
         let channels: Vec<String> = self.subscribed_channels.keys().cloned().collect();
-        channels.into_iter()
+        channels
+            .into_iter()
             .map(|ch| self.unsubscribe_from_channel(ch))
             .collect()
     }
 
     pub fn handle_ping(&self, message: Option<String>) -> Vec<u8> {
         let pong_msg = message.unwrap_or_else(|| "PONG".to_string());
-        let response = vec![
-            Value::String("pong".to_string()),
-            Value::String("".to_string()),
-        ];
+        let response = vec![Value::String("pong".to_string()), Value::String("".to_string())];
         encode_vec_of_value(response)
     }
 
@@ -173,23 +177,18 @@ impl SubscriptionModeHandler {
             }
             Some("UNSUBSCRIBE") => {
                 if command.len() > 1 {
-                    // Unsubscribe from specific channels
-                    let responses: Vec<Vec<u8>> = command.iter()
+                    let responses: Vec<Vec<u8>> = command
+                        .iter()
                         .skip(1)
                         .map(|ch| self.unsubscribe_from_channel(ch.clone()))
                         .collect();
                     Ok(responses.into_iter().flatten().collect())
                 } else {
-                    // Unsubscribe from all
                     Ok(self.unsubscribe_from_all().into_iter().flatten().collect())
                 }
             }
-            Some("PING") => {
-                Ok(self.handle_ping(command.get(1).cloned()))
-            }
-            Some("QUIT") => {
-                Err("QUIT".to_string()) // Signal to exit
-            }
+            Some("PING") => Ok(self.handle_ping(command.get(1).cloned())),
+            Some("QUIT") => Err("QUIT".to_string()),
             Some("PSUBSCRIBE") | Some("PUNSUBSCRIBE") => {
                 Ok(encode_error("ERR Pattern subscriptions not implemented"))
             }
@@ -200,84 +199,98 @@ impl SubscriptionModeHandler {
         }
     }
 
-    pub fn check_messages(&mut self) -> Vec<Vec<u8>> {
-        let mut messages = Vec::new();
-
-        for (channel_name, rx) in self.subscribed_channels.iter_mut() {
-            match rx.try_recv() {
-                Ok(message) => {
-                    let response = vec![
-                        Value::String("message".to_string()),
-                        Value::String(message.channel),
-                        Value::String(message.content),
-                    ];
-                    messages.push(encode_vec_of_value(response));
-                }
-                Err(broadcast::error::TryRecvError::Empty) => {
-                    // No message available
-                }
-                Err(e) => {
-                    eprintln!("Subscription channel error for {}: {}", channel_name, e);
-                }
-            }
-        }
-
-        messages
-    }
-
     pub fn is_subscribed(&self) -> bool {
         !self.subscribed_channels.is_empty()
     }
 
-    pub fn run_loop(&mut self, stream: &mut TcpStream) {
-        println!("+++++++++++ Entering subscription mode");
+    pub async fn run_loop_async(&mut self, stream: &mut tokio::net::TcpStream) {
+        println!("+++++++++++ Entering subscription mode (async)");
 
+        // Merge all channel receivers into one stream using tokio's select macro
         loop {
-            // Check for published messages
-            for message_data in self.check_messages() {
-                if let Err(e) = stream.write_all(&message_data) {
-                    eprintln!("Failed to write message to subscriber: {}", e);
-                    return;
-                }
-            }
+            let mut buffer = [0u8; 512];
 
-            // Read command from client
-            let mut buffer = [0; 512];
-            match stream.read(&mut buffer) {
-                Ok(size) if size > 0 => {
-                    if let Some(decoded_command) = decode_resp_array(&buffer) {
-                        match self.handle_command(decoded_command) {
-                            Ok(response) => {
-                                if let Err(e) = stream.write_all(&response) {
-                                    eprintln!("Failed to send response: {}", e);
-                                    break;
-                                }
-
-                                // Exit if no channels left
-                                if !self.is_subscribed() {
-                                    println!("No channels left, exiting subscription mode");
-                                    break;
-                                }
+            // Wait for either a message from any channel OR client input
+            tokio::select! {
+                result = Self::recv_from_any_channel(&mut self.subscribed_channels) => {
+                    match result {
+                        Some((channel, message)) => {
+                            let response = vec![
+                                Value::String("message".to_string()),
+                                Value::String(message.channel),
+                                Value::String(message.content),
+                            ];
+                            if let Err(e) = stream.write_all(&encode_vec_of_value(response)).await {
+                                eprintln!("Failed to write message to subscriber: {}", e);
+                                return;
                             }
-                            Err(msg) if msg == "QUIT" => {
-                                println!("Client requested QUIT");
-                                let _ = stream.write_all(&encode_str("OK"));
-                                break;
-                            }
-                            Err(e) => {
-                                eprintln!("Error handling command: {}", e);
-                                break;
-                            }
+                        }
+                        None => {
+                            eprintln!("All channels closed");
+                            return;
                         }
                     }
                 }
-                Ok(_) => continue,
-                Err(e) => {
-                    eprintln!("Failed to read from stream: {}", e);
-                    break;
+
+                read_result = stream.read(&mut buffer) => {
+                    match read_result {
+                        Ok(size) if size > 0 => {
+                            if let Some(decoded_command) = decode_resp_array(&buffer) {
+                                match self.handle_command(decoded_command) {
+                                    Ok(response) => {
+                                        if let Err(e) = stream.write_all(&response).await {
+                                            eprintln!("Failed to send response: {}", e);
+                                            break;
+                                        }
+
+                                        if !self.is_subscribed() {
+                                            println!("No channels left, exiting subscription mode");
+                                            break;
+                                        }
+                                    }
+                                    Err(msg) if msg == "QUIT" => {
+                                        println!("Client requested QUIT");
+                                        let _ = stream.write_all(&encode_str("OK")).await;
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Error handling command: {}", e);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Ok(_) => continue,
+                        Err(e) => {
+                            eprintln!("Failed to read from stream: {}", e);
+                            break;
+                        }
+                    }
                 }
             }
         }
+    }
+
+    async fn recv_from_any_channel(
+        channels: &mut HashMap<String, broadcast::Receiver<Message>>,
+    ) -> Option<(String, Message)> {
+        if channels.is_empty() {
+            std::future::pending::<()>().await;
+            return None;
+        }
+
+        let mut futures = Vec::new();
+        for (name, rx) in channels.iter_mut() {
+            futures.push(async { (name.clone(), rx.recv().await) });
+        }
+
+        for future in futures {
+            if let (name, Ok(msg)) = future.await {
+                return Some((name, msg));
+            }
+        }
+
+        None
     }
 }
 
@@ -286,7 +299,7 @@ pub fn subscribe(client_id: String, channel: String) -> Vec<u8> {
     let mut vector: Vec<Value> = vec![
         Value::String("subscribe".to_string()),
         Value::String(channel),
-        Value::Integer(count as i64)
+        Value::Integer(count as i64),
     ];
     encode_vec_of_value(vector)
 }
