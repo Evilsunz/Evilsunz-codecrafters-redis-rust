@@ -137,7 +137,7 @@ fn main() {
             };
 
             let decoded_command = decode_resp_array(&buffer).unwrap_or_else(|| {
-                panic!("Failed to decode command");
+                panic!("Failed to decode command {:?}", &buffer);
             });
             //Stupid
             let decoded_commandz = decoded_command.clone();
