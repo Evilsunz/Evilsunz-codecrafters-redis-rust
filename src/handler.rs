@@ -274,7 +274,7 @@ impl Handler<'_> {
             ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),
             PSync(arg1,arg2, ri) => psync(arg1.clone(), arg2.clone(), ri.clone()),
             Wait(arg1,arg2) => wait(arg1, arg2),
-            ZAdd(arg1, arg2, arg3) => ZSET_STORE.zadd(arg1, *arg2, arg3),
+            ZAdd(set_name, value, key) => ZSET_STORE.zadd(set_name, key, *value),
             Null => crate::encode_str("Command not recognized"),
         }
     }
