@@ -205,7 +205,7 @@ impl Handler<'_> {
             Ping => crate::encode_str("PONG"),
             Echo(str) => crate::encode_str(str),
             Incr(str) => KV_STORE.incr(str.clone()),
-            Subscribe(str) => subscribe(str.clone()),
+            Subscribe(str) =>vec!(),
             Set(key, value, expire, expire_unit) => {
                 KV_STORE.set(key.clone(), value.clone(), expire.clone() , expire_unit.clone())
             }

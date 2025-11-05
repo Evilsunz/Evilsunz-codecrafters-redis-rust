@@ -120,64 +120,164 @@ fn main() {
         let mut tx_context = TXContext::default();
         let rdb_settings_clone = rdb_settings.clone();
 
-        // Load RDB data if available
         if let Err(e) = load_rdb_data(rdb_settings, &mut tx_context, &mut ri) {
             eprintln!("Failed to load RDB data: {}", e);
         }
 
         loop {
             let mut buffer = [0; 512];
-            let size = stream.read(&mut buffer).unwrap();
+            let size = match stream.read(&mut buffer) {
+                Ok(size) => size,
+                Err(e) => {
+                    eprintln!("Failed to read from stream: {}", e);
+                    break;
+                }
+            };
+
             let decoded_command = decode_resp_array(&buffer).unwrap_or_else(|| {
                 panic!("Failed to decode command");
             });
+            //Stupid
+            let decoded_commandz = decoded_command.clone();
             let command = decoded_command.get(0).unwrap().clone();
             println!("Decoded +++++ {:?}", decoded_command);
+
             let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, rdb_settings_clone.clone());
             println!("Handling {:?}", handler);
             let handler_name = handler.to_string();
             let response = handler.process_command();
-            stream.write_all(&response).unwrap();
-            if (!ri.is_replica && command.eq("SET")) {
-                REPLICA_STORE
-                    .notifiers
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .for_each(|(k, v)| {
-                        let _ = match v.send(Some(buffer[..size].to_vec())) {
-                            Ok(_) => {
-                                set_send_to_replica(true);
-                            }
-                            Err(err) => {
-                                println!(" +++++++ error: {}", err);
-                            }
-                        };
-                    });
+
+            if let Err(e) = stream.write_all(&response) {
+                eprintln!("Failed to write response: {}", e);
+                break;
             }
+
+            if !ri.is_replica && command.eq("SET") {
+                notify_replicas_on_set(&buffer, size);
+            }
+
             if handler_name.starts_with("PSync") {
-                println!(" +++++++++++ Received PSync command");
-                let rdb = get_rdb_file();
-                stream
-                    .write_all(format!("${}\r\n", rdb.len()).as_bytes())
-                    .unwrap();
-                stream.write_all(&rdb).unwrap();
-                REPLICA_STREAMS.lock().unwrap().push(ReplicaStream { stream: Arc::new(Mutex::new(stream.try_clone().unwrap())) });
-                let mut rx = REPLICA_STORE
-                    .notifiers
-                    .lock()
-                    .unwrap()
-                    .entry(generate_master_repl_id())
-                    .or_insert_with(|| watch::channel(None).0)
-                    .subscribe();
-                loop {
-                    if rx.has_changed().unwrap() {
-                        if let Some(command) = rx.borrow_and_update().clone() {
-                            //println!(" +++++++ Received {}" , String::from_utf8_lossy(&command));
-                            stream.write_all(&command).unwrap();
+                handle_psync_command(&mut stream);
+                break;
+            }
+
+            if handler_name.starts_with("Subscribe") {
+                use codecrafters_redis::channels::SubscriptionModeHandler;
+                use std::thread;
+                let second_command = decoded_commandz.get(1).unwrap().clone();
+                let client_id = format!("client_{:?}", thread::current().id());
+                let mut sub_handler = SubscriptionModeHandler::new(client_id);
+
+                if !second_command.is_empty() {
+                    let initial_response = sub_handler.subscribe_to_channel(second_command.clone());
+                    if let Err(e) = stream.write_all(&initial_response) {
+                        eprintln!("Failed to send initial subscription response: {}", e);
+                        break;
+                    }
+                }
+
+                sub_handler.run_loop(&mut stream);
+                break;
+            }
+        }
+    }
+
+    fn notify_replicas_on_set(buffer: &[u8], size: usize) {
+        REPLICA_STORE
+            .notifiers
+            .lock()
+            .unwrap()
+            .iter()
+            .for_each(|(_, sender)| {
+                match sender.send(Some(buffer[..size].to_vec())) {
+                    Ok(_) => {
+                        set_send_to_replica(true);
+                    }
+                    Err(err) => {
+                        eprintln!("Failed to send to replica: {}", err);
+                    }
+                }
+            });
+    }
+
+    fn handle_psync_command(stream: &mut TcpStream) {
+        println!("+++++++++++ Received PSync command");
+
+        let rdb = get_rdb_file();
+        if let Err(e) = stream.write_all(format!("${}\r\n", rdb.len()).as_bytes()) {
+            eprintln!("Failed to write RDB length: {}", e);
+            return;
+        }
+
+        if let Err(e) = stream.write_all(&rdb) {
+            eprintln!("Failed to write RDB data: {}", e);
+            return;
+        }
+
+        // Register this stream as a replica
+        if let Ok(cloned_stream) = stream.try_clone() {
+            REPLICA_STREAMS.lock().unwrap().push(ReplicaStream {
+                stream: Arc::new(Mutex::new(cloned_stream))
+            });
+        }
+
+        start_replica_sync_loop(stream);
+    }
+
+    fn handle_subscribe_command(stream: &mut TcpStream, channel_name: &str) {
+        use codecrafters_redis::channels::PUBSUB;
+        use codecrafters_redis::encode_vec_of_value;
+        use std::thread;
+
+        println!("+++++++++++ Entering subscription mode for channel: {}", channel_name);
+        let client_id = format!("client_{:?}", thread::current().id());
+        let (mut rx, _count) = PUBSUB.subscribe(client_id, channel_name.to_string());
+        loop {
+            match rx.blocking_recv() {
+                Ok(message) => {
+                    let response = vec![
+                        resp::Value::String("message".to_string()),
+                        resp::Value::String(message.channel),
+                        resp::Value::String(message.content),
+                    ];
+                    let encoded = encode_vec_of_value(response);
+                    if let Err(e) = stream.write_all(&encoded) {
+                        eprintln!("Failed to write message to subscriber: {}", e);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Subscription channel error: {}", e);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn start_replica_sync_loop(stream: &mut TcpStream) {
+        let mut rx = REPLICA_STORE
+            .notifiers
+            .lock()
+            .unwrap()
+            .entry(generate_master_repl_id())
+            .or_insert_with(|| watch::channel(None).0)
+            .subscribe();
+
+        loop {
+            match rx.has_changed() {
+                Ok(true) => {
+                    if let Some(command) = rx.borrow_and_update().clone() {
+                        if let Err(e) = stream.write_all(&command) {
+                            eprintln!("Failed to write to replica: {}", e);
+                            break;
                         }
                     }
                 }
+                Err(e) => {
+                    eprintln!("Replica sync channel error: {}", e);
+                    break;
+                }
+                _ => {}
             }
         }
     }

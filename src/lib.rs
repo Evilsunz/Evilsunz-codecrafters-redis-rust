@@ -4,7 +4,7 @@ mod stream_store;
 mod replication;
 mod rdb_parser;
 mod rdb;
-mod channels;
+pub mod channels;
 
 use std::any::type_name;
 use std::collections::HashMap;
