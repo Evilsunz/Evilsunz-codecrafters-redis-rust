@@ -22,8 +22,11 @@ impl ZSetStore {
     pub fn zadd(&self, set_name: &str, key : f32, val : &str ) -> Vec<u8> {
         let mut binding = self.store.lock().unwrap();
         let index_map = binding.entry(set_name.to_string()).or_insert_with(IndexMap::new);
-        index_map.insert(OrderedFloat(key), val.to_string());
-        encode_int(&(1 as usize))
+        let result = index_map.insert(OrderedFloat(key), val.to_string());
+        match result {
+            Some(_) => encode_int(&(0 as usize)),
+            None => encode_int(&(1 as usize))
+        }
     }
 
     // pub fn len(&self, list_name: String) -> Vec<u8> {
