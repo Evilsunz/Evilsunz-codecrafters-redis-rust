@@ -5,6 +5,7 @@ mod replication;
 mod rdb_parser;
 mod rdb;
 pub mod channels;
+pub mod zset;
 
 use std::any::type_name;
 use std::collections::HashMap;

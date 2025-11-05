@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -11,6 +11,7 @@ use resp::Value;
 use crate::channels::subscribe;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
+use crate::zset::ZSET_STORE;
 
 #[derive(Debug)]
 pub enum Handler<'a> {
@@ -43,6 +44,8 @@ pub enum Handler<'a> {
     ReplConf(String, String, ReplicaInstance),
     PSync(String, String, ReplicaInstance),
     Wait(u64,u64),
+    //ZSET
+    ZAdd(String, f32, String),
     Null,
 }
 
@@ -76,6 +79,8 @@ const WAIT: &str = "WAIT";
 //subscribe
 const SUBSCRIBE: &str = "SUBSCRIBE";
 const PUBLISH: &str = "PUBLISH";
+//zset
+const ZADD: &str = "ZADD";
 //misc
 const OK: &'static str = "OK";
 
@@ -136,7 +141,7 @@ impl Handler<'_> {
                 RPush(list_name, values)
             },
             Some(XRANGE) => {
-                let ( stream_name , start_id , end_id ) = Self::parse_three_args(&vector);
+                let ( stream_name , start_id , end_id ) = Self::parse_three_args(&vector).unwrap_or_default();
                 XRange(stream_name, start_id, end_id)
             },
             Some(LPUSH) => {
@@ -182,6 +187,10 @@ impl Handler<'_> {
             Some(WAIT) => {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
                 Wait(arg1.parse().unwrap_or_default(), arg2.parse().unwrap_or_default())
+            },
+            Some(ZADD) => {
+                let (arg1, arg2, arg3) =Self::parse_three_args(&vector).unwrap_or_default();
+                ZAdd(arg1, arg2.parse().unwrap(), arg3)
             },
             _ => Null,
         }
@@ -265,6 +274,7 @@ impl Handler<'_> {
             ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),
             PSync(arg1,arg2, ri) => psync(arg1.clone(), arg2.clone(), ri.clone()),
             Wait(arg1,arg2) => wait(arg1, arg2),
+            ZAdd(arg1, arg2, arg3) => ZSET_STORE.zadd(arg1, *arg2, arg3),
             Null => crate::encode_str("Command not recognized"),
         }
     }
@@ -277,10 +287,14 @@ impl Handler<'_> {
         Some((vector.get(1)?.clone(), vector.get(2)?.clone()))
     }
 
-    fn parse_three_args(vector: &[String]) -> (String, String, String) {
-        (vector.get(1).cloned().unwrap_or_default(), vector.get(2).cloned().unwrap_or_default(), vector.get(3).cloned().unwrap_or_default())
+    fn parse_three_args(vector: &[String]) -> Option<(String, String, String)> {
+        Some((vector.get(1)?.clone(), vector.get(2)?.clone(), vector.get(3)?.clone()))
     }
 
+    fn parse_three_args3(vector: &[String]) -> (String, String, String) {
+        (vector.get(1).cloned().unwrap_or_default(), vector.get(2).cloned().unwrap_or_default(), vector.get(3).cloned().unwrap_or_default())
+    }
+    
     fn parse_four_args(vector: &[String]) -> Option<(String, String, Option<String>, Option<u128>)> {
         Some((
             vector.get(1)?.clone(),
