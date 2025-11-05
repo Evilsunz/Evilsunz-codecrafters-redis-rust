@@ -157,7 +157,7 @@ impl SubscriptionModeHandler {
         let pong_msg = message.unwrap_or_else(|| "PONG".to_string());
         let response = vec![
             Value::String("pong".to_string()),
-            Value::String(pong_msg),
+            Value::String("".to_string()),
         ];
         encode_vec_of_value(response)
     }
