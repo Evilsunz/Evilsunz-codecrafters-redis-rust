@@ -193,9 +193,10 @@ impl SubscriptionModeHandler {
             Some("PSUBSCRIBE") | Some("PUNSUBSCRIBE") => {
                 Ok(encode_error("ERR Pattern subscriptions not implemented"))
             }
-            _ => {
-                Ok(encode_error("ERR only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT are allowed in this context"))
+            Some(unknown_cmd) => {
+                Ok(encode_error(&format!("ERR Can't execute '{}' only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT are allowed in this context", unknown_cmd)))
             }
+            _ => Err("ERR wrong number of arguments for 'psubscribe' command".to_string()),
         }
     }
 
