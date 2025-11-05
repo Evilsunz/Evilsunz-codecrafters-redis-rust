@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -37,6 +37,7 @@ pub enum Handler<'a> {
     Keys,
     //Subscribe
     Subscribe(String),
+    Publish(String),
     //Replication
     Info(String, ReplicaInstance),
     ReplConf(String, String, ReplicaInstance),
@@ -74,6 +75,7 @@ const PSYNC: &str = "PSYNC";
 const WAIT: &str = "WAIT";
 //subscribe
 const SUBSCRIBE: &str = "SUBSCRIBE";
+const PUBLISH: &str = "PUBLISH";
 //misc
 const OK: &'static str = "OK";
 
@@ -117,6 +119,7 @@ impl Handler<'_> {
             Some(TYPE) => Self::parse_single_arg(&vector).map(Type).unwrap_or(Null),
             Some(INCR) => Self::parse_single_arg(&vector).map(Incr).unwrap_or(Null),
             Some(SUBSCRIBE) => Self::parse_single_arg(&vector).map(Subscribe).unwrap_or(Null),
+            Some(PUBLISH) => Self::parse_single_arg(&vector).map(Publish).unwrap_or(Null),
             Some(XREAD) => {
                 let (timeout , config) = Self::parse_hash_map(&vector);
                 XRead(timeout, config)
@@ -206,6 +209,7 @@ impl Handler<'_> {
             Echo(str) => crate::encode_str(str),
             Incr(str) => KV_STORE.incr(str.clone()),
             Subscribe(str) =>vec!(),
+            Publish(str) =>vec!(),
             Set(key, value, expire, expire_unit) => {
                 KV_STORE.set(key.clone(), value.clone(), expire.clone() , expire_unit.clone())
             }

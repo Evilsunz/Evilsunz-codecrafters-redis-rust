@@ -1,5 +1,5 @@
 use clap::Parser;
-use codecrafters_redis::{decode_resp_array, encode_string, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
+use codecrafters_redis::{decode_resp_array, encode_int, encode_string, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use tokio::sync::watch::error::SendError;
 use log::error;
+use codecrafters_redis::channels::{PubSub, PUBSUB};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -179,6 +180,18 @@ fn main() {
                 sub_handler.run_loop(&mut stream);
                 break;
             }
+
+            if handler_name.starts_with("Publish") {
+                use codecrafters_redis::channels::SubscriptionModeHandler;
+                use std::thread;
+                let client_id = format!("client_{:?}", thread::current().id());
+                let second_command = decoded_commandz.get(1).unwrap().clone();
+                let third_command = decoded_commandz.get(2).unwrap().clone();
+
+                let subscriber_count = PUBSUB.publish(second_command.clone(),third_command.clone());
+                stream.write_all(&encode_int(&subscriber_count));
+            }
+
         }
     }
 
