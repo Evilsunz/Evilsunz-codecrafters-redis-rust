@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -46,6 +46,7 @@ pub enum Handler<'a> {
     Wait(u64,u64),
     //ZSET
     ZAdd(String, f32, String),
+    ZRank(String, String),
     Null,
 }
 
@@ -81,6 +82,7 @@ const SUBSCRIBE: &str = "SUBSCRIBE";
 const PUBLISH: &str = "PUBLISH";
 //zset
 const ZADD: &str = "ZADD";
+const ZRANK: &str = "ZRANK";
 //misc
 const OK: &'static str = "OK";
 
@@ -192,6 +194,10 @@ impl Handler<'_> {
                 let (arg1, arg2, arg3) =Self::parse_three_args(&vector).unwrap_or_default();
                 ZAdd(arg1, arg2.parse().unwrap(), arg3)
             },
+            Some(ZRANK) => {
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                ZRank(arg1, arg2)
+            },
             _ => Null,
         }
     }
@@ -275,6 +281,7 @@ impl Handler<'_> {
             PSync(arg1,arg2, ri) => psync(arg1.clone(), arg2.clone(), ri.clone()),
             Wait(arg1,arg2) => wait(arg1, arg2),
             ZAdd(set_name, value, key) => ZSET_STORE.zadd(set_name, key, *value),
+            ZRank(set_name, key) => ZSET_STORE.zrank(set_name, key),
             Null => crate::encode_str("Command not recognized"),
         }
     }
