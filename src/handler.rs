@@ -47,6 +47,7 @@ pub enum Handler<'a> {
     //ZSET
     ZAdd(String, f32, String),
     ZRank(String, String),
+    ZRange(String, isize, isize),
     Null,
 }
 
@@ -83,6 +84,7 @@ const PUBLISH: &str = "PUBLISH";
 //zset
 const ZADD: &str = "ZADD";
 const ZRANK: &str = "ZRANK";
+const ZRANGE: &str = "ZRANGE";
 //misc
 const OK: &'static str = "OK";
 
