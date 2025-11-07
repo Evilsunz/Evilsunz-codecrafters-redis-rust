@@ -1,4 +1,4 @@
-use crate::{encode_error, encode_int, encode_null, encode_str, encode_value, encode_vec, type_of, RespArray, RespNull, RespString, TXContext};
+use crate::{encode_bulk_string, encode_error, encode_int, encode_null, encode_str, encode_value, encode_vec, encode_vec_as_bulk, type_of, RespArray, RespArrayOfValue, RespArrayOfValueBulk, RespBulkString, RespNull, RespString, TXContext};
 use resp::{encode, Value};
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
@@ -69,7 +69,7 @@ impl KeyValueStore {
     }
 
     fn build_list_response(&self, list_name: &str, value: Value) -> Vec<u8> {
-        let response = vec![Value::String(list_name.to_string()), value];
+        let response = vec![Value::Bulk(list_name.to_string()), value];
         encode(&Value::Array(response))
     }
 
@@ -91,13 +91,14 @@ impl KeyValueStore {
             return self.pop_multiple_elements(inner_list, count);
         }
         let first_value = inner_list.remove(0);
-        RespString(first_value).into()
+        RespBulkString(first_value).into()
     }
 
     fn pop_multiple_elements(&self, list: &mut Vec<String>, count: u64) -> Value {
         let count_usize = count.try_into().unwrap_or(0);
         let items = list.drain(0..count_usize).collect::<Vec<String>>();
-        RespArray(items).into()
+        let values : Vec<Value> = items.iter().map(|v| Value::Bulk(v.clone())).collect();
+        RespArrayOfValue(values).into()
     }
 
     pub fn len(&self, list_name: String) -> Vec<u8> {
@@ -118,10 +119,7 @@ impl KeyValueStore {
         println!("Adding to list: {:?}", internal_list);
         if let Some(tx) = self.notifiers.lock().unwrap().get(&list_name) {
             println!("Sending notification");
-            println!(
-                " ++++++++ Sending notification to {:?}",
-                tx.receiver_count()
-            );
+            println!(" ++++++++ Sending notification to {:?}", tx.receiver_count());
             let _ = tx.send(Some(String::from("UPD")));
         }
         println!("Done sending notification");
@@ -149,7 +147,7 @@ impl KeyValueStore {
 
         let slice_indices = self.calculate_slice_indices(start, end, inner_list.len());
         match slice_indices {
-            Some((start_idx, end_idx)) => encode_vec(inner_list[start_idx..=end_idx].to_vec()),
+            Some((start_idx, end_idx)) => encode_vec_as_bulk(inner_list[start_idx..=end_idx].to_vec()),
             None => encode_vec(vec![]),
         }
     }
@@ -196,7 +194,7 @@ impl KeyValueStore {
 
     pub fn keys(&self) -> Vec<u8>{
         let result = self.store.lock().unwrap().keys().map(|k| k.to_string()).collect::<Vec<String>>();
-        encode_vec(result)
+        encode_vec_as_bulk(result)
     }
     
     fn calculate_expiration_time(
@@ -237,7 +235,7 @@ impl KeyValueStore {
             }
         }
         match store.get(key) {
-            Some(value) => encode_str(value),
+            Some(value) => encode_bulk_string(value.to_string()),
             None => encode(&Value::Null),
         }
     }

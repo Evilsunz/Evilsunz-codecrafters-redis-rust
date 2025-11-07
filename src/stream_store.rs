@@ -1,6 +1,6 @@
 use crate::{encode_str, RespNull};
 use crate::{
-    encode_bulk_string, encode_error, encode_vec, encode_vec_of_value, RespArray, RespArrayOfValue,
+    encode_bulk_str, encode_error, encode_vec, encode_vec_of_value, RespArray, RespArrayOfValue,
     RespBulkString,
 };
 use indexmap::IndexMap;
@@ -48,7 +48,7 @@ impl StreamStore {
             println!(" ++++++++ Sending notification to {:?}", tx.receiver_count());
             let _ = tx.send(Some(new_stream_id_str.to_string()));
         }
-        encode_bulk_string(new_stream_id_str)
+        encode_bulk_str(new_stream_id_str)
     }
 
     pub fn get_xread(&self, stream_and_id : IndexMap<String, String>, timeout: Option<u64>) -> Vec<u8>{

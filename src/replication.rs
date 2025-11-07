@@ -4,7 +4,7 @@ use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::thread;
-use crate::{encode_buf_bulk, encode_int, encode_str, encode_string, encode_vec, generate_master_repl_id, get_send_to_replica, ReplicaInstance, REPLICA_STORE, REPLICA_STREAMS};
+use crate::{encode_buf_bulk, encode_bulk_string, encode_int, encode_str, encode_string, encode_vec, encode_vec_as_bulk, generate_master_repl_id, get_send_to_replica, ReplicaInstance, REPLICA_STORE, REPLICA_STREAMS};
 use base64::prelude::*;
 use resp::{encode, Value};
 use tokio::sync::watch;
@@ -12,7 +12,7 @@ use tokio::sync::watch;
 const FULLRESYNC: &str = "+FULLRESYNC";
 
 pub fn get_info(header: String, ri : ReplicaInstance) -> Vec<u8>{
-        encode_string(ri.get_info())
+        encode_bulk_string(ri.get_info())
 }
 
 pub fn psync(arg1 : String, arg2 : String, ri : ReplicaInstance) -> Vec<u8>{
@@ -21,7 +21,7 @@ pub fn psync(arg1 : String, arg2 : String, ri : ReplicaInstance) -> Vec<u8>{
 }
 
 pub fn wait(arg1: &u64, timeout: &u64) -> Vec<u8> {
-    let str = encode_vec(vec!("REPLCONF".to_string(), "GETACK".to_string(), "*".to_string()));
+    let str = encode_vec_as_bulk(vec!("REPLCONF".to_string(), "GETACK".to_string(), "*".to_string()));
     let replies = Arc::new(Mutex::new(0));
     let timeout_millis = *timeout;
 
@@ -58,7 +58,7 @@ pub fn wait(arg1: &u64, timeout: &u64) -> Vec<u8> {
 
 pub fn repl_conf(arg1 : String, arg2 : String, ri : ReplicaInstance) -> Vec<u8> {
     if (arg1.eq("GETACK")){
-        return encode_vec(vec!("REPLCONF".to_string(), "ACK".to_string(), ri.bytes_offset.to_string()));
+        return encode_vec_as_bulk(vec!("REPLCONF".to_string(), "ACK".to_string(), ri.bytes_offset.to_string()));
     }
     encode_str("OK")
 }

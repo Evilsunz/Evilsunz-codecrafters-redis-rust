@@ -150,14 +150,14 @@ impl ReplicaInstance {
     }
 
     fn send_ping(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
-        let ping = encode_vec(vec![PING.to_string()]);
+        let ping = encode_vec_as_bulk(vec![PING.to_string()]);
         let response = self.send_and_receive(stream, ping)?;
         println!("Received ping response: {:?}", decode_slice_to_value(&response));
         Ok(())
     }
 
     fn send_replconf_listening_port(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
-        let repl_conf = encode_vec(vec![
+        let repl_conf = encode_vec_as_bulk(vec![
             REPL_CONF1_1.to_string(),
             REPL_CONF1_2.to_string(),
             self.own_port.to_string(),
@@ -168,7 +168,7 @@ impl ReplicaInstance {
     }
 
     fn send_replconf_capabilities(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
-        let repl_conf = encode_vec(vec![
+        let repl_conf = encode_vec_as_bulk(vec![
             REPL_CONF2_1.to_string(),
             REPL_CONF2_2.to_string(),
             REPL_CONF2_3.to_string(),
@@ -178,7 +178,7 @@ impl ReplicaInstance {
     }
 
     fn send_psync(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
-        let psync = encode_vec(vec![
+        let psync = encode_vec_as_bulk(vec![
             PSYNC1.to_string(),
             PSYNC2.to_string(),
             PSYNC3.to_string(),
@@ -424,8 +424,12 @@ pub fn encode_string(s: String) -> Vec<u8> {
     encode_value(RespString(s))
 }
 
-pub fn encode_bulk_string(s: &str) -> Vec<u8> {
+pub fn encode_bulk_str(s: &str) -> Vec<u8> {
     encode_value(RespBulkString(String::from(s)))
+}
+
+pub fn encode_bulk_string(s: String) -> Vec<u8> {
+    encode_value(RespBulkString(s))
 }
 
 pub fn encode_error(s: &str) -> Vec<u8> {
@@ -438,6 +442,11 @@ pub fn encode_int(i: &usize) -> Vec<u8> {
 
 pub fn encode_vec(v: Vec<String>) -> Vec<u8> {
     encode_value(RespArray(v))
+}
+
+pub fn encode_vec_as_bulk(v: Vec<String>) -> Vec<u8> {
+    let values = v.iter().map(|s|Value::Bulk(s.to_string())).collect::<Vec<Value>>();
+    encode_value(RespArrayOfValue(values))
 }
 
 pub fn encode_vec_of_value(v: Vec<Value>) -> Vec<u8> {

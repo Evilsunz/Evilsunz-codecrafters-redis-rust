@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -200,6 +200,10 @@ impl Handler<'_> {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
                 ZRank(arg1, arg2)
             },
+            Some(ZRANGE) => {
+                let (arg1, arg2, arg3) =Self::parse_three_args(&vector).unwrap_or_default();
+                ZRange(arg1, arg2.parse().unwrap(), arg3.parse().unwrap())
+            },
             _ => Null,
         }
     }
@@ -223,7 +227,7 @@ impl Handler<'_> {
     pub fn process_command(&self) -> Vec<u8> {
         match self {
             Ping => crate::encode_str("PONG"),
-            Echo(str) => crate::encode_str(str),
+            Echo(str) => crate::encode_bulk_str(str),
             Incr(str) => KV_STORE.incr(str.clone()),
             Subscribe(str) =>vec!(),
             Publish(str) =>vec!(),
@@ -284,6 +288,7 @@ impl Handler<'_> {
             Wait(arg1,arg2) => wait(arg1, arg2),
             ZAdd(set_name, value, key) => ZSET_STORE.zadd(set_name, key, *value),
             ZRank(set_name, key) => ZSET_STORE.zrank(set_name, key),
+            ZRange(set_name, start, end) => ZSET_STORE.zrange(set_name, start.clone(), end.clone()),
             Null => crate::encode_str("Command not recognized"),
         }
     }

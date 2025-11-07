@@ -3,7 +3,8 @@ use std::fmt::Debug;
 use std::sync::{LazyLock, Mutex};
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
-use crate::{encode_int, encode_null, encode_vec};
+use resp::Value;
+use crate::{encode_buf_bulk, encode_bulk_str, encode_int, encode_null, encode_vec, encode_vec_of_value};
 
 pub static ZSET_STORE: LazyLock<ZSetStore> = LazyLock::new(|| ZSetStore::new());
 
@@ -42,8 +43,8 @@ impl ZSetStore {
     pub fn zrange(&self, set_name: &str, start : isize, end : isize) -> Vec<u8> {
         let mut binding = self.store.lock().unwrap();
         let index_map = binding.entry(set_name.to_string()).or_insert_with(IndexMap::new);
-        let result = Self::get_range(index_map, start, end).iter().map(|(_, k, _)| k.clone()).collect();
-        encode_vec(result)
+        let result = Self::get_range(index_map, start, end).iter().map(|(_, k, _)| Value::Bulk(k.clone())).collect();
+        encode_vec_of_value(result)
     }
 
     fn sort(&self, index_map : &mut IndexMap<String, OrderedFloat<f32>> , set_name: &str) {

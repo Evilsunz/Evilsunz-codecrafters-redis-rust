@@ -1,7 +1,5 @@
 
-use crate::{
-    decode_resp_array, encode_error, encode_int, encode_str, encode_vec, encode_vec_of_value,
-};
+use crate::{decode_resp_array, encode_error, encode_int, encode_str, encode_vec, encode_vec_as_bulk, encode_vec_of_value};
 use resp::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -133,8 +131,8 @@ impl SubscriptionModeHandler {
         self.subscribed_channels.insert(channel.clone(), rx);
 
         let response = vec![
-            Value::String("subscribe".to_string()),
-            Value::String(channel),
+            Value::Bulk("subscribe".to_string()),
+            Value::Bulk(channel),
             Value::Integer(count as i64),
         ];
         encode_vec_of_value(response)
@@ -145,8 +143,8 @@ impl SubscriptionModeHandler {
         let count = PUBSUB.unsubscribe(&self.client_id, &channel);
 
         let response = vec![
-            Value::String("unsubscribe".to_string()),
-            Value::String(channel),
+            Value::Bulk("unsubscribe".to_string()),
+            Value::Bulk(channel),
             Value::Integer(count as i64),
         ];
         encode_vec_of_value(response)
@@ -162,8 +160,8 @@ impl SubscriptionModeHandler {
 
     pub fn handle_ping(&self, message: Option<String>) -> Vec<u8> {
         let pong_msg = message.unwrap_or_else(|| "PONG".to_string());
-        let response = vec![Value::String("pong".to_string()), Value::String("".to_string())];
-        encode_vec_of_value(response)
+        let response = vec!["pong".to_string(), "".to_string()];
+        encode_vec_as_bulk(response)
     }
 
     pub fn handle_command(&mut self, command: Vec<String>) -> Result<Vec<u8>, String> {
@@ -216,11 +214,12 @@ impl SubscriptionModeHandler {
                     match result {
                         Some((channel, message)) => {
                             let response = vec![
-                                Value::String("message".to_string()),
-                                Value::String(message.channel),
-                                Value::String(message.content),
+                                "message".to_string(),
+                                message.channel,
+                                message.content,
                             ];
-                            if let Err(e) = stream.write_all(&encode_vec_of_value(response)).await {
+                            //println!("+++++++++++ Received {:?} bytes from {}", response, channel);
+                            if let Err(e) = stream.write_all(&encode_vec_as_bulk(response)).await {
                                 eprintln!("Failed to write message to subscriber: {}", e);
                                 return;
                             }
