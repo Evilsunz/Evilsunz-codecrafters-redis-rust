@@ -5,18 +5,14 @@ use std::sync::{LazyLock, Mutex};
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use resp::Value;
-use crate::{encode_buf_bulk, encode_bulk_str, encode_error, encode_int, encode_null, encode_vec, encode_vec_of_value};
+use crate::{encode_bulk_str, encode_error, encode_int, encode_null,encode_vec_of_value};
+use crate::geo_serde::{encode, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
 
 pub static ZSET_STORE: LazyLock<ZSetStore> = LazyLock::new(|| ZSetStore::new());
 
 pub struct ZSetStore {
     store: Mutex<HashMap<String, IndexMap<String, OrderedFloat<f64>>>>,
 }
-
-const MIN_LONGITUDE: f64 = -180.0;
-const MAX_LONGITUDE: f64 = 180.0;
-const MIN_LATITUDE: f64 = -85.05112878;
-const MAX_LATITUDE: f64 = 85.05112878;
 
 impl ZSetStore {
     fn new() -> Self {
@@ -85,7 +81,7 @@ impl ZSetStore {
             None => encode_int(&0),
         }
     }
-    
+
     //GEO
 
     pub fn geoadd(&self, set_name: &str, lon : &f64, lat : &f64 , place : &str ) -> Vec<u8> {
@@ -94,8 +90,8 @@ impl ZSetStore {
         }
         let mut binding = self.store.lock().unwrap();
         let index_map = binding.entry(set_name.to_string()).or_insert_with(IndexMap::new);
-
-        let result = index_map.insert(place.to_string(),OrderedFloat(0.0));
+        let enc_lon_lat = encode(*lon, *lat);
+        let result = index_map.insert(place.to_string(),OrderedFloat(enc_lon_lat as f64));
         //inserts less that readings ? or vise versa
         self.sort(index_map, set_name);
         match result {
@@ -105,11 +101,11 @@ impl ZSetStore {
     }
 
     //MISC
-    
+
     fn validate_lon_lat(lon: f64, lat : f64) -> bool {
         (lon >= MIN_LONGITUDE && lon <= MAX_LONGITUDE) && (lat >= MIN_LATITUDE && lat <= MAX_LATITUDE)
     }
-    
+
     fn sort(&self, index_map : &mut IndexMap<String, OrderedFloat<f64>> , set_name: &str) {
         index_map.sort_by(|k1, v1, k2, v2|
             v1.cmp(v2).then_with(|| k1.cmp(k2))
