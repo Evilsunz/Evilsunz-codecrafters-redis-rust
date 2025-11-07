@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{LazyLock, Mutex};
@@ -45,6 +46,15 @@ impl ZSetStore {
         let index_map = binding.entry(set_name.to_string()).or_insert_with(IndexMap::new);
         let result = Self::get_range(index_map, start, end).iter().map(|(_, k, _)| Value::Bulk(k.clone())).collect();
         encode_vec_of_value(result)
+    }
+
+    pub fn zcard(&self, set_name: &str) -> Vec<u8> {
+        let mut binding = self.store.lock().unwrap();
+        let len = binding
+            .get(set_name)
+            .map(|v| v.len())
+            .unwrap_or(0);
+        encode_int(&len)
     }
 
     fn sort(&self, index_map : &mut IndexMap<String, OrderedFloat<f32>> , set_name: &str) {
