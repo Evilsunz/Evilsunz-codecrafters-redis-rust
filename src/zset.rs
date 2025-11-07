@@ -5,8 +5,8 @@ use std::sync::{LazyLock, Mutex};
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use resp::Value;
-use crate::{encode_bulk_str, encode_error, encode_int, encode_null,encode_vec_of_value};
-use crate::geo_serde::{encode, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
+use crate::{encode_bulk_str, encode_error, encode_int, encode_null, encode_vec_as_bulk, encode_vec_of_value};
+use crate::geo_serde::{decode, encode, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
 
 pub static ZSET_STORE: LazyLock<ZSetStore> = LazyLock::new(|| ZSetStore::new());
 
@@ -98,6 +98,23 @@ impl ZSetStore {
             Some(_) => encode_int(&(0 as usize)),
             None => encode_int(&(1 as usize))
         }
+    }
+
+    pub fn geopos(&self, set_name: &str, places: Vec<String>) -> Vec<u8> {
+        let mut binding = self.store.lock().unwrap();
+        let index_map = binding.entry(set_name.to_string()).or_insert_with(IndexMap::new);
+        let mut response = vec![];
+        for place in places {
+            let entry = index_map.get(&place);
+            match entry {
+                Some(coords) => {
+                    let coords = decode(coords.into_inner() as u64);
+                    response.push(Value::Array(vec![Value::Bulk(coords.longitude.to_string()), Value::Bulk(coords.latitude.to_string())]));
+                }
+                None => {response.push(Value::NullArray)}
+            }
+        }
+        encode_vec_of_value(response)
     }
 
     //MISC

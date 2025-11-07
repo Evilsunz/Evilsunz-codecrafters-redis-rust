@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -50,6 +50,7 @@ pub enum Handler<'a> {
     ZRem(String, String),
     //Geo
     GeoAdd(String, f64, f64, String),
+    GeoPos(String, Vec<String>),
     Null,
 }
 
@@ -92,6 +93,7 @@ const ZSCORE: &str = "ZSCORE";
 const ZREM: &str = "ZREM";
 //Geo
 const GEOADD: &str = "GEOADD";
+const GEOPOS: &str = "GEOPOS";
 //misc
 const OK: &'static str = "OK";
 
@@ -224,6 +226,10 @@ impl Handler<'_> {
                 let (set_name, lon , lat, place) =Self::parse_four_args(&vector).unwrap_or_default();
                 GeoAdd(set_name, lon.parse().unwrap_or_default(), lat.parse().unwrap_or_default(), place)
             },
+            Some(GEOPOS) => {
+                let (set_name, places) =Self::parse_one_and_list_args(&vector);
+                GeoPos(set_name, places)
+            },
             _ => Null,
         }
     }
@@ -313,6 +319,7 @@ impl Handler<'_> {
             ZScore(set_name,key) => ZSET_STORE.zscore(set_name, key),
             ZRem(set_name,key) => ZSET_STORE.zrem(set_name, key),
             GeoAdd(set_name,lon, lat, place) => ZSET_STORE.geoadd(set_name, lon, lat , place),
+            GeoPos(set_name, places) => ZSET_STORE.geopos(set_name, places.to_vec()),
             Null => crate::encode_str("Command not recognized"),
         }
     }

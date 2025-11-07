@@ -7,9 +7,9 @@ const LATITUDE_RANGE: f64 = MAX_LATITUDE - MIN_LATITUDE;
 const LONGITUDE_RANGE: f64 = MAX_LONGITUDE - MIN_LONGITUDE;
 
 #[derive(Debug)]
-struct Coordinates {
-    latitude: f64,
-    longitude: f64,
+pub struct Coordinates {
+    pub latitude: f64,
+    pub longitude: f64,
 }
 
 pub fn encode(longitude: f64, latitude: f64 ) -> u64 {
