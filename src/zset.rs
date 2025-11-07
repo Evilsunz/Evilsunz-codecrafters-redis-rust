@@ -10,7 +10,7 @@ use crate::{encode_buf_bulk, encode_bulk_str, encode_int, encode_null, encode_ve
 pub static ZSET_STORE: LazyLock<ZSetStore> = LazyLock::new(|| ZSetStore::new());
 
 pub struct ZSetStore {
-    store: Mutex<HashMap<String, IndexMap<String, OrderedFloat<f32>>>>,
+    store: Mutex<HashMap<String, IndexMap<String, OrderedFloat<f64>>>>,
 }
 
 impl ZSetStore {
@@ -20,7 +20,7 @@ impl ZSetStore {
         }
     }
 
-    pub fn zadd(&self, set_name: &str, key : &str, val : f32 ) -> Vec<u8> {
+    pub fn zadd(&self, set_name: &str, key : &str, val : f64 ) -> Vec<u8> {
         let mut binding = self.store.lock().unwrap();
         let index_map = binding.entry(set_name.to_string()).or_insert_with(IndexMap::new);
         let result = index_map.insert(key.to_string(),OrderedFloat(val));
@@ -57,13 +57,25 @@ impl ZSetStore {
         encode_int(&len)
     }
 
-    fn sort(&self, index_map : &mut IndexMap<String, OrderedFloat<f32>> , set_name: &str) {
+    pub fn zscore(&self, set_name: &str, key : &str) -> Vec<u8> {
+        let mut binding = self.store.lock().unwrap();
+        let score_opt = binding
+            .get(set_name)
+            .and_then(|v| v.get(key));
+
+        match score_opt {
+            Some(score) => encode_bulk_str(&score.to_string()),
+            None => encode_null(),
+        }
+    }
+
+    fn sort(&self, index_map : &mut IndexMap<String, OrderedFloat<f64>> , set_name: &str) {
         index_map.sort_by(|k1, v1, k2, v2|
             v1.cmp(v2).then_with(|| k1.cmp(k2))
         );
     }
 
-    fn get_range(map: &IndexMap<String, OrderedFloat<f32>>, start: isize, end: isize) -> Vec<(usize, String, OrderedFloat<f32>)> {
+    fn get_range(map: &IndexMap<String, OrderedFloat<f64>>, start: isize, end: isize) -> Vec<(usize, String, OrderedFloat<f64>)> {
         let len = map.len();
 
         let start_idx = if start < 0 {
