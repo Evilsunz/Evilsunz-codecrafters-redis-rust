@@ -1,14 +1,12 @@
 use indexmap::IndexMap;
-use tokio::time::timeout;
-use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem};
+use crate::{decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
-use std::fmt::format;
 use resp::Value;
-use crate::channels::subscribe;
+use crate::geo::GEO_STORE;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::zset::ZSET_STORE;
@@ -51,6 +49,8 @@ pub enum Handler<'a> {
     ZCard(String),
     ZScore(String, String),
     ZRem(String, String),
+    //Geo
+    GeoAdd(String, f64, f64, String),
     Null,
 }
 
@@ -91,6 +91,8 @@ const ZRANGE: &str = "ZRANGE";
 const ZCARD: &str = "ZCARD";
 const ZSCORE: &str = "ZSCORE";
 const ZREM: &str = "ZREM";
+//Geo
+const GEOADD: &str = "GEOADD";
 //misc
 const OK: &'static str = "OK";
 
@@ -139,7 +141,7 @@ impl Handler<'_> {
                 let (timeout , config) = Self::parse_hash_map(&vector);
                 XRead(timeout, config)
             },
-            Some(SET) => Self::parse_four_args(&vector)
+            Some(SET) => Self::parse_four_args_with_options(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
                 .unwrap_or(Null),
             Some(XADD) => {
@@ -219,13 +221,17 @@ impl Handler<'_> {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
                 ZRem(arg1, arg2)
             },
+            Some(GEOADD) => {
+                let (set_name, lon , lat, place) =Self::parse_four_args(&vector).unwrap_or_default();
+                GeoAdd(set_name, lon.parse().unwrap_or_default(), lat.parse().unwrap_or_default(), place)
+            },
             _ => Null,
         }
     }
 
     pub fn repl_from_command(vector: Vec<String>, ri: &mut ReplicaInstance) -> Handler<'static> {
         match vector.first().map(|s| s.as_str()) {
-            Some(SET) => Self::parse_four_args(&vector)
+            Some(SET) => Self::parse_four_args_with_options(&vector)
                 .map(|(key, value, expire_unit, expire_dur)| Set(key, value, expire_unit, expire_dur))
                 .unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
@@ -307,6 +313,7 @@ impl Handler<'_> {
             ZCard(set_name) => ZSET_STORE.zcard(set_name),
             ZScore(set_name,key) => ZSET_STORE.zscore(set_name, key),
             ZRem(set_name,key) => ZSET_STORE.zrem(set_name, key),
+            GeoAdd(set_name,lon, lat, place) => GEO_STORE.geoadd(set_name, lon, lat , place),
             Null => crate::encode_str("Command not recognized"),
         }
     }
@@ -327,7 +334,7 @@ impl Handler<'_> {
         (vector.get(1).cloned().unwrap_or_default(), vector.get(2).cloned().unwrap_or_default(), vector.get(3).cloned().unwrap_or_default())
     }
     
-    fn parse_four_args(vector: &[String]) -> Option<(String, String, Option<String>, Option<u128>)> {
+    fn parse_four_args_with_options(vector: &[String]) -> Option<(String, String, Option<String>, Option<u128>)> {
         Some((
             vector.get(1)?.clone(),
             vector.get(2)?.clone(),
@@ -336,6 +343,15 @@ impl Handler<'_> {
         ))
     }
 
+    fn parse_four_args(vector: &[String]) -> Option<(String, String, String, String)> {
+        Some((
+            vector.get(1)?.clone(),
+            vector.get(2)?.clone(),
+            vector.get(3)?.clone(),
+            vector.get(4)?.clone(),
+        ))
+    }
+    
     fn parse_one_and_list_args(vector: &[String]) -> (String, Vec<String>) {
         let list_name = vector.get(1).cloned().unwrap_or_default();
         let values = vector.iter().skip(2).cloned().collect::<Vec<String>>();
