@@ -218,7 +218,7 @@ impl SubscriptionModeHandler {
                                 message.channel,
                                 message.content,
                             ];
-                            //println!("+++++++++++ Received {:?} bytes from {}", response, channel);
+                            println!("+++++++++++ Received {:?} bytes from {}", response, channel);
                             if let Err(e) = stream.write_all(&encode_vec_as_bulk(response)).await {
                                 eprintln!("Failed to write message to subscriber: {}", e);
                                 return;
@@ -273,18 +273,21 @@ impl SubscriptionModeHandler {
     async fn recv_from_any_channel(
         channels: &mut HashMap<String, broadcast::Receiver<Message>>,
     ) -> Option<(String, Message)> {
+        use futures::stream::{FuturesUnordered, StreamExt};
+
         if channels.is_empty() {
             std::future::pending::<()>().await;
-            return None;
+            unreachable!();
         }
 
-        let mut futures = Vec::new();
+        let mut futures = FuturesUnordered::new();
         for (name, rx) in channels.iter_mut() {
-            futures.push(async { (name.clone(), rx.recv().await) });
+            let name = name.clone();
+            futures.push(async move { (name, rx.recv().await) });
         }
 
-        for future in futures {
-            if let (name, Ok(msg)) = future.await {
+        while let Some((name, result)) = futures.next().await {
+            if let Ok(msg) = result {
                 return Some((name, msg));
             }
         }
