@@ -6,7 +6,6 @@ mod rdb_parser;
 mod rdb;
 pub mod channels;
 mod zset;
-mod geo;
 
 use std::any::type_name;
 use std::collections::HashMap;

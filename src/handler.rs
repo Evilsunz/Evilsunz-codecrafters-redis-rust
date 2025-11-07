@@ -6,7 +6,6 @@ use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use resp::Value;
-use crate::geo::GEO_STORE;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::zset::ZSET_STORE;
@@ -313,7 +312,7 @@ impl Handler<'_> {
             ZCard(set_name) => ZSET_STORE.zcard(set_name),
             ZScore(set_name,key) => ZSET_STORE.zscore(set_name, key),
             ZRem(set_name,key) => ZSET_STORE.zrem(set_name, key),
-            GeoAdd(set_name,lon, lat, place) => GEO_STORE.geoadd(set_name, lon, lat , place),
+            GeoAdd(set_name,lon, lat, place) => ZSET_STORE.geoadd(set_name, lon, lat , place),
             Null => crate::encode_str("Command not recognized"),
         }
     }
