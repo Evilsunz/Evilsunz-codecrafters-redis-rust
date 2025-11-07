@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use tokio::time::timeout;
 use crate::{decode_slice_to_value, decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -50,6 +50,7 @@ pub enum Handler<'a> {
     ZRange(String, isize, isize),
     ZCard(String),
     ZScore(String, String),
+    ZRem(String, String),
     Null,
 }
 
@@ -89,6 +90,7 @@ const ZRANK: &str = "ZRANK";
 const ZRANGE: &str = "ZRANGE";
 const ZCARD: &str = "ZCARD";
 const ZSCORE: &str = "ZSCORE";
+const ZREM: &str = "ZREM";
 //misc
 const OK: &'static str = "OK";
 
@@ -213,6 +215,10 @@ impl Handler<'_> {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
                 ZScore(arg1, arg2)
             },
+            Some(ZREM) => {
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                ZRem(arg1, arg2)
+            },
             _ => Null,
         }
     }
@@ -300,6 +306,7 @@ impl Handler<'_> {
             ZRange(set_name, start, end) => ZSET_STORE.zrange(set_name, start.clone(), end.clone()),
             ZCard(set_name) => ZSET_STORE.zcard(set_name),
             ZScore(set_name,key) => ZSET_STORE.zscore(set_name, key),
+            ZRem(set_name,key) => ZSET_STORE.zrem(set_name, key),
             Null => crate::encode_str("Command not recognized"),
         }
     }

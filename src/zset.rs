@@ -69,6 +69,18 @@ impl ZSetStore {
         }
     }
 
+    pub fn zrem(&self, set_name: &str, key : &str) -> Vec<u8> {
+        let mut binding = self.store.lock().unwrap();
+        let score_opt = binding
+            .get_mut(set_name)
+            .and_then(|v| v.shift_remove(key));
+
+        match score_opt {
+            Some(score) => encode_int(&1),
+            None => encode_int(&0),
+        }
+    }
+    
     fn sort(&self, index_map : &mut IndexMap<String, OrderedFloat<f64>> , set_name: &str) {
         index_map.sort_by(|k1, v1, k2, v2|
             v1.cmp(v2).then_with(|| k1.cmp(k2))
