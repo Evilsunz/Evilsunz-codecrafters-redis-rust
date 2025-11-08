@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -51,6 +51,7 @@ pub enum Handler<'a> {
     //Geo
     GeoAdd(String, f64, f64, String),
     GeoPos(String, Vec<String>),
+    GeoDist(String, String, String),
     Null,
 }
 
@@ -94,6 +95,7 @@ const ZREM: &str = "ZREM";
 //Geo
 const GEOADD: &str = "GEOADD";
 const GEOPOS: &str = "GEOPOS";
+const GEODIST: &str = "GEODIST";
 //misc
 const OK: &'static str = "OK";
 
@@ -230,6 +232,10 @@ impl Handler<'_> {
                 let (set_name, places) =Self::parse_one_and_list_args(&vector);
                 GeoPos(set_name, places)
             },
+            Some(GEODIST) => {
+                let (set_name, place1, place2) =Self::parse_three_args(&vector).unwrap_or_default();
+                GeoDist(set_name, place1, place2)
+            },
             _ => Null,
         }
     }
@@ -320,6 +326,7 @@ impl Handler<'_> {
             ZRem(set_name,key) => ZSET_STORE.zrem(set_name, key),
             GeoAdd(set_name,lon, lat, place) => ZSET_STORE.geoadd(set_name, lon, lat , place),
             GeoPos(set_name, places) => ZSET_STORE.geopos(set_name, places.to_vec()),
+            GeoDist(set_name, place1, place2) => ZSET_STORE.geodist(set_name, place1, place2),
             Null => crate::encode_str("Command not recognized"),
         }
     }
@@ -336,9 +343,9 @@ impl Handler<'_> {
         Some((vector.get(1)?.clone(), vector.get(2)?.clone(), vector.get(3)?.clone()))
     }
 
-    fn parse_three_args3(vector: &[String]) -> (String, String, String) {
-        (vector.get(1).cloned().unwrap_or_default(), vector.get(2).cloned().unwrap_or_default(), vector.get(3).cloned().unwrap_or_default())
-    }
+    // fn parse_three_args3(vector: &[String]) -> (String, String, String) {
+    //     (vector.get(1).cloned().unwrap_or_default(), vector.get(2).cloned().unwrap_or_default(), vector.get(3).cloned().unwrap_or_default())
+    // }
     
     fn parse_four_args_with_options(vector: &[String]) -> Option<(String, String, Option<String>, Option<u128>)> {
         Some((

@@ -8,8 +8,8 @@ const LONGITUDE_RANGE: f64 = MAX_LONGITUDE - MIN_LONGITUDE;
 
 #[derive(Debug)]
 pub struct Coordinates {
-    pub latitude: f64,
-    pub longitude: f64,
+    pub lat: f64,
+    pub lon: f64,
 }
 
 pub fn encode(longitude: f64, latitude: f64 ) -> u64 {
@@ -36,6 +36,20 @@ pub fn decode(geo_code: u64) -> Coordinates {
     convert_grid_numbers_to_coordinates(grid_latitude_number, grid_longitude_number)
 }
 
+pub fn distance(origin: Coordinates, destination: Coordinates) -> f64 {
+    const R: f64 = 6372797.560856;
+    //const R: f64 = 6372.8;
+
+    let lat1 = origin.lat.to_radians();
+    let lat2 = destination.lat.to_radians();
+    let d_lat = lat2 - lat1;
+    let d_lon = (destination.lon - origin.lon).to_radians();
+
+    let a = (d_lat / 2.0).sin().powi(2) + (d_lon / 2.0).sin().powi(2) * lat1.cos() * lat2.cos();
+    let c = 2.0 * a.sqrt().asin();
+    R * c
+}
+
 fn compact_int64_to_int32(v: u64) -> u32 {
     let mut result = v & 0x5555555555555555;
     result = (result | (result >> 1)) & 0x3333333333333333;
@@ -53,10 +67,10 @@ fn convert_grid_numbers_to_coordinates(grid_latitude_number: u32, grid_longitude
     let grid_longitude_max = MIN_LONGITUDE + LONGITUDE_RANGE * ((grid_longitude_number + 1) as f64 / 2.0_f64.powi(26));
 
     // Calculate the center point of the grid cell
-    let latitude = (grid_latitude_min + grid_latitude_max) / 2.0;
-    let longitude = (grid_longitude_min + grid_longitude_max) / 2.0;
+    let lat = (grid_latitude_min + grid_latitude_max) / 2.0;
+    let lon = (grid_longitude_min + grid_longitude_max) / 2.0;
 
-    Coordinates { latitude, longitude }
+    Coordinates { lat, lon }
 }
 
 fn spread_int32_to_int64(v: u32) -> u64 {

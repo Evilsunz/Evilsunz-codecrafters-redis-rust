@@ -5,8 +5,8 @@ use std::sync::{LazyLock, Mutex};
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use resp::Value;
-use crate::{encode_bulk_str, encode_error, encode_int, encode_null, encode_vec_as_bulk, encode_vec_of_value};
-use crate::geo_serde::{decode, encode, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
+use crate::{encode_bulk_str, encode_bulk_string, encode_error, encode_int, encode_null, encode_vec_as_bulk, encode_vec_of_value};
+use crate::geo_serde::{decode, distance, encode, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
 
 pub static ZSET_STORE: LazyLock<ZSetStore> = LazyLock::new(|| ZSetStore::new());
 
@@ -109,12 +109,32 @@ impl ZSetStore {
             match entry {
                 Some(coords) => {
                     let coords = decode(coords.into_inner() as u64);
-                    response.push(Value::Array(vec![Value::Bulk(coords.longitude.to_string()), Value::Bulk(coords.latitude.to_string())]));
+                    response.push(Value::Array(vec![Value::Bulk(coords.lon.to_string()), Value::Bulk(coords.lat.to_string())]));
                 }
                 None => {response.push(Value::NullArray)}
             }
         }
         encode_vec_of_value(response)
+    }
+
+    pub fn geodist(&self, set_name: &str, place1 : &str, place2 : &str) -> Vec<u8> {
+        let mut binding = self.store.lock().unwrap();
+        let index_map = binding.entry(set_name.to_string()).or_insert_with(IndexMap::new);
+        let coord1 = match index_map.get(place1) {
+            None => {
+                return encode_null()
+            }
+            Some(v) => {v}
+        };
+
+        let coord2 = match index_map.get(place2) {
+            None => {
+                return encode_null()
+            }
+            Some(v) => {v}
+        };
+        let dist = distance(decode(coord1.into_inner() as u64), decode(coord2.into_inner() as u64));
+        encode_bulk_string(dist.to_string())
     }
 
     //MISC
