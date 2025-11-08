@@ -1,15 +1,12 @@
 use clap::Parser;
 use codecrafters_redis::{decode_resp_array, encode_int, encode_string, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
-use std::collections::HashMap;
+use codecrafters_redis::acl::Auth;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock, Mutex};
-use std::{mem, thread};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{thread};
 use tokio::sync::watch;
-use tokio::sync::watch::error::SendError;
-use log::error;
 use codecrafters_redis::channels::{PubSub, PUBSUB};
 use tokio::runtime::Runtime;
 
@@ -110,7 +107,7 @@ fn main() {
                         vec_command.push(value.as_string().unwrap());
                     }
 
-                    Handler::from_command(vec_command, tx_context, ri, Some(settings.clone()))
+                    Handler::from_command(vec_command, tx_context, ri,&mut Auth::default(), Some(settings.clone()))
                         .process_command();
                 }
             }
@@ -120,6 +117,7 @@ fn main() {
 
     fn handle_stream(mut stream: TcpStream, mut ri: ReplicaInstance, rdb_settings: Option<RdbSettings>) {
         let mut tx_context = TXContext::default();
+        let mut auth = Auth::default();
         let rdb_settings_clone = rdb_settings.clone();
 
         if let Err(e) = load_rdb_data(rdb_settings, &mut tx_context, &mut ri) {
@@ -144,7 +142,7 @@ fn main() {
             let command = decoded_command.get(0).unwrap().clone();
             println!("Decoded +++++ {:?}", decoded_command);
 
-            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, rdb_settings_clone.clone());
+            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, &mut auth, rdb_settings_clone.clone());
             println!("Handling {:?}", handler);
             let handler_name = handler.to_string();
             let response = handler.process_command();

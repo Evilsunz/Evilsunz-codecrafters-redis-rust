@@ -1,12 +1,13 @@
 use indexmap::IndexMap;
 use crate::{decode_to_value, encode_bulk_str, encode_bulk_string, encode_error, encode_null, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
+use log::error;
 use resp::Value;
-use crate::acl::get_user;
+use crate::acl::{Auth, AUTH_STORE};
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::zset::ZSET_STORE;
@@ -55,8 +56,9 @@ pub enum Handler<'a> {
     GeoDist(String, String, String),
     GeoSearch(String, f64, f64, f64, String),
     //Acl
-    WhoAmi,
-    GetUser,
+    WhoAmi(Auth),
+    GetUser(Auth),
+    SetUser(RefCell<&'a mut Auth>, String, String),
     Null,
 }
 
@@ -106,6 +108,7 @@ const GEOSEARCH: &str = "GEOSEARCH";
 const ACL: &str = "ACL";
 const WHOAMI: &str = "WHOAMI";
 const GETUSER: &str = "GETUSER";
+const SETUSER: &str = "SETUSER";
 
 //misc
 const OK: &'static str = "OK";
@@ -124,7 +127,8 @@ impl fmt::Display for Handler<'_> {
 }
 
 impl Handler<'_> {
-    pub fn from_command<'a>(vector: Vec<String>, tx_context: &'a mut TXContext, ri: &mut ReplicaInstance, rdb_settings: Option<RdbSettings>) -> Handler<'a> {
+    //But default we must check auth for every command - but for now let's only use it in ACL ones
+    pub fn from_command<'a>(vector: Vec<String>, tx_context: &'a mut TXContext, ri: &mut ReplicaInstance, auth: &'a mut Auth, rdb_settings: Option<RdbSettings>) -> Handler<'a> {
         if tx_context.is_active &&
             !vector.first().map(|s| s.as_str()).unwrap_or("").eq(EXEC) &&
             !vector.first().map(|s| s.as_str()).unwrap_or("").eq(DISCARD) {
@@ -255,10 +259,14 @@ impl Handler<'_> {
             Some(ACL) => {
                 match vector.iter().nth(1).map(|s| s.as_str()) {
                     Some(WHOAMI) => {
-                        WhoAmi
+                        WhoAmi(auth.clone())
                     },
                     Some(GETUSER) => {
-                        GetUser
+                        GetUser(auth.clone())
+                    },
+                    Some(SETUSER) => {
+                        let (username, password) = Self::parse_set_user(&vector).unwrap_or_default();
+                        SetUser(RefCell::new(auth), username, password)
                     },
                     _ => Null
                 }
@@ -331,7 +339,7 @@ impl Handler<'_> {
                     let mut final_output: Vec<Value> = vec!();
                     for command in tx_context_borrowed.store.iter() {
                         println!("Executing command: {:?}", command);
-                        let mut output = Handler::from_command(command.clone() , &mut TXContext::default(), &mut ReplicaInstance::default(), None).process_command();
+                        let mut output = Handler::from_command(command.clone() , &mut TXContext::default() , &mut ReplicaInstance::default(),&mut Auth::default() ,None).process_command();
                         final_output.push(decode_to_value(output));
                     }
                     encode_vec_of_value(final_output)
@@ -355,8 +363,9 @@ impl Handler<'_> {
             GeoPos(set_name, places) => ZSET_STORE.geopos(set_name, places.to_vec()),
             GeoDist(set_name, place1, place2) => ZSET_STORE.geodist(set_name, place1, place2),
             GeoSearch(set_name, lon, lat, range , unit) => ZSET_STORE.geosearch(set_name, lon, lat , range, unit),
-            WhoAmi => encode_bulk_str(DEFAULT),
-            GetUser => get_user(),
+            WhoAmi(auth) => encode_bulk_str(DEFAULT),
+            GetUser(auth) => AUTH_STORE.get_user(auth.clone()),
+            SetUser(auth,username, password) => AUTH_STORE.set_user(auth, username, password),
             Null => crate::encode_str("Command not recognized"),
         }
     }
@@ -402,6 +411,19 @@ impl Handler<'_> {
             vector.get(4)?.clone().parse().unwrap(),
             vector.get(6)?.clone().parse().unwrap(),
             vector.get(7)?.clone(),
+        ))
+    }
+
+    fn parse_set_user(vector: &[String]) -> Option<(String, String)> {
+        let passwd = vector.get(3)?.clone();
+        if !passwd.starts_with(">"){
+            //char > what else ?
+            error!("Password not starts with > ")
+        }
+        let passwd = passwd.strip_prefix(">").unwrap();
+        Some((
+            vector.get(2)?.clone(),
+            passwd.to_string(),
         ))
     }
 
