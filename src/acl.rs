@@ -3,11 +3,12 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use resp::Value;
 use sha2::{Digest, Sha256};
-use crate::{encode_null, encode_string, encode_vec, encode_vec_as_bulk, encode_vec_of_value};
+use crate::{encode_error, encode_null, encode_string, encode_vec, encode_vec_as_bulk, encode_vec_of_value};
 
 const FLAGS: &str = "flags";
 const NOPASS: &str = "nopass";
 const PASSWORDS: &str = "passwords";
+const USER_PASS_INCORRECT: &str = "WRONGPASS invalid username-password pair or user is disabled.";
 
 
 #[derive(Debug, Clone)]
@@ -57,7 +58,6 @@ impl AuthStore {
         }
 
     pub fn get_user(&self, auth : Auth) -> Vec<u8> {
-        println!(" ++++++++++++++ {:?}", auth);
         let user_info = vec![Value::Bulk(FLAGS.to_string()),
                              Value::Array(auth.flags.iter().map(|s|Value::Bulk(s.to_string())).collect::<Vec<Value>>()),
                              Value::Bulk(PASSWORDS.to_string()),
@@ -66,15 +66,29 @@ impl AuthStore {
         encode_vec_of_value(user_info)
     }
 
-    pub fn set_user(&self, mut auth : &RefCell<&mut Auth>, username : &str, password : &str) -> Vec<u8> {
+    pub fn set_user(&self, auth : &RefCell<&mut Auth>, username : &str, password : &str) -> Vec<u8> {
         let mut borrow = auth.borrow_mut();
         let mut store = self.store.lock().unwrap();
-        let hash = format!("{:x}", Sha256::digest(password.as_bytes()));
-        println!("+++++++++++ hash {}", hash);
+        let hash = self.to_sha(password);
         store.insert(username.to_string(), hash.clone());
         borrow.flags.retain(|s| s != NOPASS);
         borrow.passwords.push(hash);
-        println!(" IIIIIIIII ++++++++++++++ {:?}", auth);
+        encode_string("OK".to_string())
+    }
+
+    pub fn auth(&self, auth : &RefCell<&mut Auth>, username : &str, password : &str) -> Vec<u8> {
+        let store = self.store.lock().unwrap();
+        println!(" +++++++ passwd: {}", password);
+        println!(" +++++++ username: {}", username);
+        let passwd = match store.get(username) {
+            Some(pwd) => pwd.to_string(),
+            None => return encode_error(USER_PASS_INCORRECT),
+        };
+
+        if self.to_sha(password) != passwd {
+            return encode_error(USER_PASS_INCORRECT);
+        }
+        auth.borrow_mut().authenticated = true;
         encode_string("OK".to_string())
     }
 
@@ -82,5 +96,9 @@ impl AuthStore {
         let mut store = self.store.lock().unwrap();
         store.contains_key(username)
     }
-    
+
+    fn to_sha(&self, password : &str) -> String{
+        format!("{:x}", Sha256::digest(password.as_bytes()))
+    }
+
 }

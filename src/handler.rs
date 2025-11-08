@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{decode_to_value, encode_bulk_str, encode_bulk_string, encode_error, encode_null, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -59,6 +59,7 @@ pub enum Handler<'a> {
     WhoAmi(Auth),
     GetUser(Auth),
     SetUser(RefCell<&'a mut Auth>, String, String),
+    AclAuth(RefCell<&'a mut Auth>, String, String),
     Null,
 }
 
@@ -109,6 +110,7 @@ const ACL: &str = "ACL";
 const WHOAMI: &str = "WHOAMI";
 const GETUSER: &str = "GETUSER";
 const SETUSER: &str = "SETUSER";
+const AUTH: &str = "AUTH";
 
 //misc
 const OK: &'static str = "OK";
@@ -271,6 +273,13 @@ impl Handler<'_> {
                     _ => Null
                 }
             },
+            Some(AUTH) => {
+                let (username, password) = Self::parse_auth(&vector).unwrap_or_default();
+                println!(" +++++++ vec {:?} ", vector);
+                println!(" +++++++ passwd: {}", password);
+                println!(" +++++++ username: {}", username);
+                AclAuth(RefCell::new(auth), username, password)
+            },
             _ => Null,
         }
     }
@@ -366,6 +375,7 @@ impl Handler<'_> {
             WhoAmi(auth) => encode_bulk_str(DEFAULT),
             GetUser(auth) => AUTH_STORE.get_user(auth.clone()),
             SetUser(auth,username, password) => AUTH_STORE.set_user(auth, username, password),
+            AclAuth(auth,username, password) => AUTH_STORE.auth(auth, username, password),
             Null => crate::encode_str("Command not recognized"),
         }
     }
@@ -424,6 +434,13 @@ impl Handler<'_> {
         Some((
             vector.get(2)?.clone(),
             passwd.to_string(),
+        ))
+    }
+
+    fn parse_auth(vector: &[String]) -> Option<(String, String)> {
+        Some((
+            vector.get(1)?.clone(),
+            vector.get(2)?.clone(),
         ))
     }
 
