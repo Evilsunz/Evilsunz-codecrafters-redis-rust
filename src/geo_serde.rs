@@ -6,7 +6,7 @@ pub const MAX_LONGITUDE: f64 = 180.0;
 const LATITUDE_RANGE: f64 = MAX_LATITUDE - MIN_LATITUDE;
 const LONGITUDE_RANGE: f64 = MAX_LONGITUDE - MIN_LONGITUDE;
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Coordinates {
     pub lat: f64,
     pub lon: f64,

@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use resp::Value;
 use crate::{encode_bulk_str, encode_bulk_string, encode_error, encode_int, encode_null, encode_vec_as_bulk, encode_vec_of_value};
-use crate::geo_serde::{decode, distance, encode, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
+use crate::geo_serde::{decode, distance, encode, Coordinates, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
 
 pub static ZSET_STORE: LazyLock<ZSetStore> = LazyLock::new(|| ZSetStore::new());
 
@@ -135,6 +135,23 @@ impl ZSetStore {
         };
         let dist = distance(decode(coord1.into_inner() as u64), decode(coord2.into_inner() as u64));
         encode_bulk_string(dist.to_string())
+    }
+
+    pub fn geosearch(&self, set_name: &str, lon : &f64, lat : &f64 , radius : &f64, unit : &str) -> Vec<u8> {
+        let point = Coordinates{
+            lat: *lat,
+            lon: *lon,
+        };
+        let mut binding = self.store.lock().unwrap();
+        let index_map = binding.entry(set_name.to_string()).or_insert_with(IndexMap::new);
+        let mut response = vec![];
+        for (key, value) in index_map {
+            let lonlat = decode(value.into_inner() as u64);
+            if (distance(point.clone(), lonlat) <= *radius){
+                response.push(Value::Bulk(key.clone()));
+            }
+        }
+        encode_vec_of_value(response)
     }
 
     //MISC

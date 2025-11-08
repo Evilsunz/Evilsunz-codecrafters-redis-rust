@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -52,6 +52,7 @@ pub enum Handler<'a> {
     GeoAdd(String, f64, f64, String),
     GeoPos(String, Vec<String>),
     GeoDist(String, String, String),
+    GeoSearch(String, f64, f64, f64, String),
     Null,
 }
 
@@ -96,6 +97,7 @@ const ZREM: &str = "ZREM";
 const GEOADD: &str = "GEOADD";
 const GEOPOS: &str = "GEOPOS";
 const GEODIST: &str = "GEODIST";
+const GEOSEARCH: &str = "GEOSEARCH";
 //misc
 const OK: &'static str = "OK";
 
@@ -236,6 +238,10 @@ impl Handler<'_> {
                 let (set_name, place1, place2) =Self::parse_three_args(&vector).unwrap_or_default();
                 GeoDist(set_name, place1, place2)
             },
+            Some(GEOSEARCH) => {
+                let (set_name, lon, lat, range, unit) =Self::parse_geosearch(&vector).unwrap_or_default();
+                GeoSearch(set_name, lon , lat , range , unit)
+            },
             _ => Null,
         }
     }
@@ -327,6 +333,7 @@ impl Handler<'_> {
             GeoAdd(set_name,lon, lat, place) => ZSET_STORE.geoadd(set_name, lon, lat , place),
             GeoPos(set_name, places) => ZSET_STORE.geopos(set_name, places.to_vec()),
             GeoDist(set_name, place1, place2) => ZSET_STORE.geodist(set_name, place1, place2),
+            GeoSearch(set_name, lon, lat, range , unit) => ZSET_STORE.geosearch(set_name, lon, lat , range, unit),
             Null => crate::encode_str("Command not recognized"),
         }
     }
@@ -364,7 +371,17 @@ impl Handler<'_> {
             vector.get(4)?.clone(),
         ))
     }
-    
+
+    fn parse_geosearch(vector: &[String]) -> Option<(String, f64, f64, f64, String)> {
+        Some((
+            vector.get(1)?.clone(),
+            vector.get(3)?.clone().parse().unwrap(),
+            vector.get(4)?.clone().parse().unwrap(),
+            vector.get(6)?.clone().parse().unwrap(),
+            vector.get(7)?.clone(),
+        ))
+    }
+
     fn parse_one_and_list_args(vector: &[String]) -> (String, Vec<String>) {
         let list_name = vector.get(1).cloned().unwrap_or_default();
         let values = vector.iter().skip(2).cloned().collect::<Vec<String>>();
