@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
-use crate::{decode_to_value, encode_error, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch};
+use crate::{decode_to_value, encode_bulk_str, encode_bulk_string, encode_error, encode_null, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -53,6 +53,8 @@ pub enum Handler<'a> {
     GeoPos(String, Vec<String>),
     GeoDist(String, String, String),
     GeoSearch(String, f64, f64, f64, String),
+    //Acl
+    WhoAmi,
     Null,
 }
 
@@ -98,8 +100,13 @@ const GEOADD: &str = "GEOADD";
 const GEOPOS: &str = "GEOPOS";
 const GEODIST: &str = "GEODIST";
 const GEOSEARCH: &str = "GEOSEARCH";
+//ACL
+const ACL: &str = "ACL";
+const WHOAMI: &str = "WHOAMI";
+
 //misc
 const OK: &'static str = "OK";
+const DEFAULT: &'static str = "default";
 
 const ERROR_EXEC_WITHOUT_MULTI: &str = "ERR EXEC without MULTI";
 const ERROR_DISCARD_WITHOUT_MULTI: &str = "ERR DISCARD without MULTI";
@@ -242,6 +249,14 @@ impl Handler<'_> {
                 let (set_name, lon, lat, range, unit) =Self::parse_geosearch(&vector).unwrap_or_default();
                 GeoSearch(set_name, lon , lat , range , unit)
             },
+            Some(ACL) => {
+                match vector.iter().nth(1).map(|s| s.as_str()) {
+                    Some(WHOAMI) => {
+                        WhoAmi
+                    },
+                    _ => Null
+                }
+            },
             _ => Null,
         }
     }
@@ -334,6 +349,7 @@ impl Handler<'_> {
             GeoPos(set_name, places) => ZSET_STORE.geopos(set_name, places.to_vec()),
             GeoDist(set_name, place1, place2) => ZSET_STORE.geodist(set_name, place1, place2),
             GeoSearch(set_name, lon, lat, range , unit) => ZSET_STORE.geosearch(set_name, lon, lat , range, unit),
+            WhoAmi => encode_bulk_str(DEFAULT),
             Null => crate::encode_str("Command not recognized"),
         }
     }
