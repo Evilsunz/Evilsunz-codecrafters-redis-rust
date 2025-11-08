@@ -7,6 +7,7 @@ mod rdb;
 pub mod channels;
 mod zset;
 mod geo_serde;
+mod acl;
 
 use std::any::type_name;
 use std::collections::HashMap;

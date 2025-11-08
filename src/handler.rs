@@ -1,11 +1,12 @@
 use indexmap::IndexMap;
 use crate::{decode_to_value, encode_bulk_str, encode_bulk_string, encode_error, encode_null, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use resp::Value;
+use crate::acl::get_user;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::zset::ZSET_STORE;
@@ -55,6 +56,7 @@ pub enum Handler<'a> {
     GeoSearch(String, f64, f64, f64, String),
     //Acl
     WhoAmi,
+    GetUser,
     Null,
 }
 
@@ -103,6 +105,7 @@ const GEOSEARCH: &str = "GEOSEARCH";
 //ACL
 const ACL: &str = "ACL";
 const WHOAMI: &str = "WHOAMI";
+const GETUSER: &str = "GETUSER";
 
 //misc
 const OK: &'static str = "OK";
@@ -254,6 +257,9 @@ impl Handler<'_> {
                     Some(WHOAMI) => {
                         WhoAmi
                     },
+                    Some(GETUSER) => {
+                        GetUser
+                    },
                     _ => Null
                 }
             },
@@ -350,6 +356,7 @@ impl Handler<'_> {
             GeoDist(set_name, place1, place2) => ZSET_STORE.geodist(set_name, place1, place2),
             GeoSearch(set_name, lon, lat, range , unit) => ZSET_STORE.geosearch(set_name, lon, lat , range, unit),
             WhoAmi => encode_bulk_str(DEFAULT),
+            GetUser => get_user(),
             Null => crate::encode_str("Command not recognized"),
         }
     }
