@@ -114,7 +114,6 @@ const AUTH: &str = "AUTH";
 
 //misc
 const OK: &'static str = "OK";
-const DEFAULT: &'static str = "default";
 
 const ERROR_EXEC_WITHOUT_MULTI: &str = "ERR EXEC without MULTI";
 const ERROR_DISCARD_WITHOUT_MULTI: &str = "ERR DISCARD without MULTI";
@@ -372,7 +371,7 @@ impl Handler<'_> {
             GeoPos(set_name, places) => ZSET_STORE.geopos(set_name, places.to_vec()),
             GeoDist(set_name, place1, place2) => ZSET_STORE.geodist(set_name, place1, place2),
             GeoSearch(set_name, lon, lat, range , unit) => ZSET_STORE.geosearch(set_name, lon, lat , range, unit),
-            WhoAmi(auth) => encode_bulk_str(DEFAULT),
+            WhoAmi(auth) => AUTH_STORE.whoami(auth.clone()),
             GetUser(auth) => AUTH_STORE.get_user(auth.clone()),
             SetUser(auth,username, password) => AUTH_STORE.set_user(auth, username, password),
             AclAuth(auth,username, password) => AUTH_STORE.auth(auth, username, password),

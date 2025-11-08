@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use resp::Value;
 use sha2::{Digest, Sha256};
-use crate::{encode_error, encode_null, encode_string, encode_vec, encode_vec_as_bulk, encode_vec_of_value};
+use crate::{encode_bulk_str, encode_error, encode_null, encode_string, encode_vec, encode_vec_as_bulk, encode_vec_of_value};
 
 const FLAGS: &str = "flags";
 const NOPASS: &str = "nopass";
 const PASSWORDS: &str = "passwords";
 const USER_PASS_INCORRECT: &str = "WRONGPASS invalid username-password pair or user is disabled.";
+const NON_AUTH: &str = "NOAUTH Authentication required.";
+const DEFAULT: &'static str = "default";
 
 
 #[derive(Debug, Clone)]
@@ -57,6 +59,13 @@ impl AuthStore {
             } 
         }
 
+    pub fn whoami(&self, auth : Auth) -> Vec<u8> {
+        if !auth.authenticated && !auth.flags.contains(&NOPASS.to_string()) {
+            return encode_error(NON_AUTH);
+        }
+        encode_bulk_str(DEFAULT)
+    }
+
     pub fn get_user(&self, auth : Auth) -> Vec<u8> {
         let user_info = vec![Value::Bulk(FLAGS.to_string()),
                              Value::Array(auth.flags.iter().map(|s|Value::Bulk(s.to_string())).collect::<Vec<Value>>()),
@@ -73,6 +82,7 @@ impl AuthStore {
         store.insert(username.to_string(), hash.clone());
         borrow.flags.retain(|s| s != NOPASS);
         borrow.passwords.push(hash);
+        borrow.authenticated = true;
         encode_string("OK".to_string())
     }
 
