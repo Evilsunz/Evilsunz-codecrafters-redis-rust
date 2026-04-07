@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{decode_to_value, encode_error, encode_str, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -19,6 +19,7 @@ pub enum Handler<'a> {
     Multi,
     Discard(RefCell<&'a mut TXContext>),
     Exec(RefCell<&'a mut TXContext>),
+    Watch(RefCell<&'a mut TXContext>),
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
@@ -61,7 +62,6 @@ pub enum Handler<'a> {
     GetUser(Auth),
     SetUser(RefCell<&'a mut Auth>, String, String),
     AclAuth(RefCell<&'a mut Auth>, String, String),
-    Watch(),
     Null,
 }
 
@@ -87,6 +87,7 @@ const KEYS: &str = "KEYS";
 const MULTI: &str = "MULTI";
 const EXEC: &str = "EXEC";
 const DISCARD: &str = "DISCARD";
+const WATCH: &str = "WATCH";
 //replication
 const INFO: &str = "INFO";
 const REPLCONF: &str = "REPLCONF";
@@ -132,14 +133,15 @@ impl fmt::Display for Handler<'_> {
 impl Handler<'_> {
     //But default we must check auth for every command - but for now let's only use it in ACL ones
     pub fn from_command<'a>(vector: Vec<String>, tx_context: &'a mut TXContext, ri: &mut ReplicaInstance, auth: &'a mut Auth, rdb_settings: Option<RdbSettings>) -> Handler<'a> {
-        if tx_context.is_active &&
-            !vector.first().map(|s| s.as_str()).unwrap_or("").eq(EXEC) &&
-            !vector.first().map(|s| s.as_str()).unwrap_or("").eq(DISCARD) {
+        let command = vector.first().map(|s| s.as_str());
+
+        if tx_context.is_active && !matches!(command, Some(EXEC | DISCARD | WATCH)) {
             tx_context.store.push(vector.clone());
             println!("Adding command to queue: {:?}", vector);
             return Queued;
         }
-        match vector.first().map(|s| s.as_str()) {
+
+        match command {
             Some(PING) => Ping,
             Some(MULTI) => {
                 tx_context.is_active = true;
@@ -149,6 +151,7 @@ impl Handler<'_> {
             Some(EXEC) => {
                 Exec(RefCell::new(tx_context))
             },
+            Some(WATCH) => Watch(RefCell::new(tx_context)),
             Some(DISCARD) => {
                 Discard(RefCell::new(tx_context))
             },
@@ -357,6 +360,7 @@ impl Handler<'_> {
                     encode_error(ERROR_EXEC_WITHOUT_MULTI)
                 }
             },
+            Watch(tx_context) => watch(tx_context),
             Config(_, arg2, rdb_settings) => get_config(arg2.to_string(), rdb_settings.clone()),
             Queued => crate::encode_str("QUEUED"),
             Info(_,ri) => get_info(ri.clone()),
@@ -377,7 +381,6 @@ impl Handler<'_> {
             GetUser(auth) => AUTH_STORE.get_user(auth.clone()),
             SetUser(auth,username, password) => AUTH_STORE.set_user(auth, username, password),
             AclAuth(auth,username, password) => AUTH_STORE.auth(auth, username, password),
-            Watch => watch(),
             Null => crate::encode_str("Command not recognized"),
         }
     }
