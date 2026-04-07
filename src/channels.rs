@@ -1,10 +1,10 @@
 
-use crate::{decode_resp_array, encode_error, encode_int, encode_str, encode_vec, encode_vec_as_bulk, encode_vec_of_value};
+use crate::{decode_resp_array, encode_error, encode_str, encode_vec_as_bulk, encode_vec_of_value};
 use resp::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast};
 
 pub static PUBSUB: LazyLock<PubSub> = LazyLock::new(|| PubSub::new());
 
@@ -158,8 +158,8 @@ impl SubscriptionModeHandler {
             .collect()
     }
 
-    pub fn handle_ping(&self, message: Option<String>) -> Vec<u8> {
-        let pong_msg = message.unwrap_or_else(|| "PONG".to_string());
+    pub fn handle_ping(&self, _: Option<String>) -> Vec<u8> {
+        // let pong_msg = message.unwrap_or_else(|| "PONG".to_string());
         let response = vec!["pong".to_string(), "".to_string()];
         encode_vec_as_bulk(response)
     }
@@ -298,7 +298,7 @@ impl SubscriptionModeHandler {
 
 pub fn subscribe(client_id: String, channel: String) -> Vec<u8> {
     let (_, count) = PUBSUB.subscribe(client_id, channel.clone());
-    let mut vector: Vec<Value> = vec![
+    let vector: Vec<Value> = vec![
         Value::String("subscribe".to_string()),
         Value::String(channel),
         Value::Integer(count as i64),

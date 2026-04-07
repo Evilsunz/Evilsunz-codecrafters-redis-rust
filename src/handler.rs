@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use crate::{decode_to_value, encode_bulk_str, encode_bulk_string, encode_error, encode_null, encode_str, encode_vec, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
+use crate::{decode_to_value, encode_error, encode_str, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
 use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
@@ -8,6 +8,7 @@ use std::fmt;
 use log::error;
 use resp::Value;
 use crate::acl::{Auth, AUTH_STORE};
+use crate::locking::watch;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::zset::ZSET_STORE;
@@ -60,6 +61,7 @@ pub enum Handler<'a> {
     GetUser(Auth),
     SetUser(RefCell<&'a mut Auth>, String, String),
     AclAuth(RefCell<&'a mut Auth>, String, String),
+    Watch(),
     Null,
 }
 
@@ -304,8 +306,8 @@ impl Handler<'_> {
             Ping => crate::encode_str("PONG"),
             Echo(str) => crate::encode_bulk_str(str),
             Incr(str) => KV_STORE.incr(str.clone()),
-            Subscribe(str) =>vec!(),
-            Publish(str) =>vec!(),
+            Subscribe(_) =>vec!(),
+            Publish(_) =>vec!(),
             Set(key, value, expire, expire_unit) => {
                 KV_STORE.set(key.clone(), value.clone(), expire.clone() , expire_unit.clone())
             }
@@ -330,7 +332,7 @@ impl Handler<'_> {
                 encode_str(OK)
             },
             Discard(tx_context) => {
-                if  { tx_context.borrow().is_active } {
+                if   tx_context.borrow().is_active  {
                     let mut tx_context_borrowed = tx_context.borrow_mut();
                     tx_context_borrowed.is_active = false;
                     tx_context_borrowed.store.clear();
@@ -347,7 +349,7 @@ impl Handler<'_> {
                     let mut final_output: Vec<Value> = vec!();
                     for command in tx_context_borrowed.store.iter() {
                         println!("Executing command: {:?}", command);
-                        let mut output = Handler::from_command(command.clone() , &mut TXContext::default() , &mut ReplicaInstance::default(),&mut Auth::default() ,None).process_command();
+                        let output = Handler::from_command(command.clone() , &mut TXContext::default() , &mut ReplicaInstance::default(),&mut Auth::default() ,None).process_command();
                         final_output.push(decode_to_value(output));
                     }
                     encode_vec_of_value(final_output)
@@ -355,12 +357,12 @@ impl Handler<'_> {
                     encode_error(ERROR_EXEC_WITHOUT_MULTI)
                 }
             },
-            Config(arg1, arg2, rdb_settings) => get_config(arg1.to_string(), arg2.to_string(), rdb_settings.clone()),
+            Config(_, arg2, rdb_settings) => get_config(arg2.to_string(), rdb_settings.clone()),
             Queued => crate::encode_str("QUEUED"),
-            Info(header,ri) => get_info(header.clone(), ri.clone()),
+            Info(_,ri) => get_info(ri.clone()),
             ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),
-            PSync(arg1,arg2, ri) => psync(arg1.clone(), arg2.clone(), ri.clone()),
-            Wait(arg1,arg2) => wait(arg1, arg2),
+            PSync(_,_, ri) => psync(ri.clone()),
+            Wait(_,arg2) => wait(arg2),
             ZAdd(set_name, value, key) => ZSET_STORE.zadd(set_name, key, *value),
             ZRank(set_name, key) => ZSET_STORE.zrank(set_name, key),
             ZRange(set_name, start, end) => ZSET_STORE.zrange(set_name, start.clone(), end.clone()),
@@ -370,11 +372,12 @@ impl Handler<'_> {
             GeoAdd(set_name,lon, lat, place) => ZSET_STORE.geoadd(set_name, lon, lat , place),
             GeoPos(set_name, places) => ZSET_STORE.geopos(set_name, places.to_vec()),
             GeoDist(set_name, place1, place2) => ZSET_STORE.geodist(set_name, place1, place2),
-            GeoSearch(set_name, lon, lat, range , unit) => ZSET_STORE.geosearch(set_name, lon, lat , range, unit),
+            GeoSearch(set_name, lon, lat, range , _) => ZSET_STORE.geosearch(set_name, lon, lat , range),
             WhoAmi(auth) => AUTH_STORE.whoami(auth.clone()),
             GetUser(auth) => AUTH_STORE.get_user(auth.clone()),
             SetUser(auth,username, password) => AUTH_STORE.set_user(auth, username, password),
             AclAuth(auth,username, password) => AUTH_STORE.auth(auth, username, password),
+            Watch => watch(),
             Null => crate::encode_str("Command not recognized"),
         }
     }

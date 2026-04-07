@@ -1,8 +1,5 @@
-use std::io::{Read, Result as IoResult, Error, ErrorKind, BufReader};
+use std::io::{Read, Result as IoResult, Error, ErrorKind};
 use std::collections::HashMap;
-use std::fs;
-use std::fs::DirEntry;
-use std::path::Path;
 use crate::RdbSettings;
 
 /// RDB file parser for Redis database files
@@ -97,28 +94,28 @@ impl<R: Read> RdbParser<R> {
             .map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid version"))?;
 
         Ok(RdbHeader {
-            magic: String::from_utf8_lossy(&magic).to_string(),
+            //magic: String::from_utf8_lossy(&magic).to_string(),
             version: version_num,
         })
     }
 
-    fn read_database(&mut self) -> IoResult<Database> {
-        let mut entries = HashMap::new();
-
-        loop {
-            let byte = self.peek_byte()?;
-
-            // Check for special opcodes that end the database section
-            if byte == 0xFF || byte == 0xFE || byte == 0xFA || byte == 0xFB {
-                break;
-            }
-
-            let (key, value) = self.read_key_value_pair()?;
-            entries.insert(key, value);
-        }
-
-        Ok(Database { entries })
-    }
+    // fn read_database(&mut self) -> IoResult<Database> {
+    //     let mut entries = HashMap::new();
+    // 
+    //     loop {
+    //         let byte = self.peek_byte()?;
+    // 
+    //         // Check for special opcodes that end the database section
+    //         if byte == 0xFF || byte == 0xFE || byte == 0xFA || byte == 0xFB {
+    //             break;
+    //         }
+    // 
+    //         let (key, value) = self.read_key_value_pair()?;
+    //         entries.insert(key, value);
+    //     }
+    // 
+    //     Ok(Database { entries })
+    // }
 
     fn read_key_value_pair(&mut self) -> IoResult<(String, RedisValue)> {
         let value_type = self.read_byte()?;
@@ -253,13 +250,13 @@ impl<R: Read> RdbParser<R> {
         Ok(buf[0])
     }
 
-    /// Helper: peek at the next byte without consuming it
-    fn peek_byte(&mut self) -> IoResult<u8> {
-        // This is a simplified version - in practice you'd need buffering
-        let byte = self.read_byte()?;
-        // Note: This doesn't actually "put back" the byte - you'd need a BufferedReader
-        Ok(byte)
-    }
+    // /// Helper: peek at the next byte without consuming it
+    // fn peek_byte(&mut self) -> IoResult<u8> {
+    //     // This is a simplified version - in practice you'd need buffering
+    //     let byte = self.read_byte()?;
+    //     // Note: This doesn't actually "put back" the byte - you'd need a BufferedReader
+    //     Ok(byte)
+    // }
 
     /// Helper: read u32 (little-endian)
     fn read_u32(&mut self) -> IoResult<u32> {
@@ -285,7 +282,7 @@ pub struct RdbFile {
 
 #[derive(Debug)]
 pub struct RdbHeader {
-    pub magic: String,
+    // pub magic: String,
     pub version: u32,
 }
 

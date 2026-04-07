@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use resp::Value;
 use sha2::{Digest, Sha256};
-use crate::{encode_bulk_str, encode_error, encode_null, encode_string, encode_vec, encode_vec_as_bulk, encode_vec_of_value};
+use crate::{encode_bulk_str, encode_error, encode_string, encode_vec_of_value};
 
 const FLAGS: &str = "flags";
 const NOPASS: &str = "nopass";
@@ -103,7 +103,7 @@ impl AuthStore {
     }
 
     pub fn is_user_passworded(&self, username : &str) -> bool {
-        let mut store = self.store.lock().unwrap();
+        let store = self.store.lock().unwrap();
         store.contains_key(username)
     }
 

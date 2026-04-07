@@ -1,13 +1,13 @@
 use clap::Parser;
-use codecrafters_redis::{decode_resp_array, encode_int, encode_string, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
+use codecrafters_redis::{decode_resp_array, encode_int, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
 use codecrafters_redis::acl::Auth;
 use std::io::{Read, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 use std::{thread};
 use tokio::sync::watch;
-use codecrafters_redis::channels::{PubSub, PUBSUB};
+use codecrafters_redis::channels::{PUBSUB};
 use tokio::runtime::Runtime;
 
 #[derive(Parser, Debug)]
@@ -29,7 +29,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     println!("{:?}", args);
-    let mut listener = TcpListener::bind(SocketAddr::new(
+    let listener = TcpListener::bind(SocketAddr::new(
         IpAddr::from_str("127.0.0.1").unwrap(),
         args.port,
     ))
@@ -55,7 +55,7 @@ fn main() {
     if ri.is_replica {
         thread::spawn(move || {
             println!("for repl thread");
-            ri2.connect_to_master();
+            let _ = ri2.connect_to_master();
         });
     }
     for stream in listener.incoming() {
@@ -191,14 +191,11 @@ fn main() {
             }
 
             if handler_name.starts_with("Publish") {
-                use codecrafters_redis::channels::SubscriptionModeHandler;
-                use std::thread;
-                let client_id = format!("client_{:?}", thread::current().id());
                 let second_command = decoded_commandz.get(1).unwrap().clone();
                 let third_command = decoded_commandz.get(2).unwrap().clone();
 
                 let subscriber_count = PUBSUB.publish(second_command.clone(),third_command.clone());
-                stream.write_all(&encode_int(&subscriber_count));
+                let  _ =stream.write_all(&encode_int(&subscriber_count));
             }
 
         }
@@ -246,35 +243,35 @@ fn main() {
         start_replica_sync_loop(stream);
     }
 
-    fn handle_subscribe_command(stream: &mut TcpStream, channel_name: &str) {
-        use codecrafters_redis::channels::PUBSUB;
-        use codecrafters_redis::encode_vec_of_value;
-        use std::thread;
-
-        println!("+++++++++++ Entering subscription mode for channel: {}", channel_name);
-        let client_id = format!("client_{:?}", thread::current().id());
-        let (mut rx, _count) = PUBSUB.subscribe(client_id, channel_name.to_string());
-        loop {
-            match rx.blocking_recv() {
-                Ok(message) => {
-                    let response = vec![
-                        resp::Value::String("message".to_string()),
-                        resp::Value::String(message.channel),
-                        resp::Value::String(message.content),
-                    ];
-                    let encoded = encode_vec_of_value(response);
-                    if let Err(e) = stream.write_all(&encoded) {
-                        eprintln!("Failed to write message to subscriber: {}", e);
-                        break;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Subscription channel error: {}", e);
-                    break;
-                }
-            }
-        }
-    }
+    // fn handle_subscribe_command(stream: &mut TcpStream, channel_name: &str) {
+    //     use codecrafters_redis::channels::PUBSUB;
+    //     use codecrafters_redis::encode_vec_of_value;
+    //     use std::thread;
+    //
+    //     println!("+++++++++++ Entering subscription mode for channel: {}", channel_name);
+    //     let client_id = format!("client_{:?}", thread::current().id());
+    //     let (mut rx, _count) = PUBSUB.subscribe(client_id, channel_name.to_string());
+    //     loop {
+    //         match rx.blocking_recv() {
+    //             Ok(message) => {
+    //                 let response = vec![
+    //                     resp::Value::String("message".to_string()),
+    //                     resp::Value::String(message.channel),
+    //                     resp::Value::String(message.content),
+    //                 ];
+    //                 let encoded = encode_vec_of_value(response);
+    //                 if let Err(e) = stream.write_all(&encoded) {
+    //                     eprintln!("Failed to write message to subscriber: {}", e);
+    //                     break;
+    //                 }
+    //             }
+    //             Err(e) => {
+    //                 eprintln!("Subscription channel error: {}", e);
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // }
 
     fn start_replica_sync_loop(stream: &mut TcpStream) {
         let mut rx = REPLICA_STORE

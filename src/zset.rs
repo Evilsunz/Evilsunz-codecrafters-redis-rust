@@ -1,11 +1,9 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::sync::{LazyLock, Mutex};
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use resp::Value;
-use crate::{encode_bulk_str, encode_bulk_string, encode_error, encode_int, encode_null, encode_vec_as_bulk, encode_vec_of_value};
+use crate::{encode_bulk_str, encode_bulk_string, encode_error, encode_int, encode_null,encode_vec_of_value};
 use crate::geo_serde::{decode, distance, encode, Coordinates, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
 
 pub static ZSET_STORE: LazyLock<ZSetStore> = LazyLock::new(|| ZSetStore::new());
@@ -50,7 +48,7 @@ impl ZSetStore {
     }
 
     pub fn zcard(&self, set_name: &str) -> Vec<u8> {
-        let mut binding = self.store.lock().unwrap();
+        let binding = self.store.lock().unwrap();
         let len = binding
             .get(set_name)
             .map(|v| v.len())
@@ -59,7 +57,7 @@ impl ZSetStore {
     }
 
     pub fn zscore(&self, set_name: &str, key : &str) -> Vec<u8> {
-        let mut binding = self.store.lock().unwrap();
+        let binding = self.store.lock().unwrap();
         let score_opt = binding
             .get(set_name)
             .and_then(|v| v.get(key));
@@ -77,7 +75,7 @@ impl ZSetStore {
             .and_then(|v| v.shift_remove(key));
 
         match score_opt {
-            Some(score) => encode_int(&1),
+            Some(_) => encode_int(&1),
             None => encode_int(&0),
         }
     }
@@ -137,7 +135,7 @@ impl ZSetStore {
         encode_bulk_string(dist.to_string())
     }
 
-    pub fn geosearch(&self, set_name: &str, lon : &f64, lat : &f64 , radius : &f64, unit : &str) -> Vec<u8> {
+    pub fn geosearch(&self, set_name: &str, lon : &f64, lat : &f64 , radius : &f64) -> Vec<u8> {
         let point = Coordinates{
             lat: *lat,
             lon: *lon,
@@ -147,7 +145,7 @@ impl ZSetStore {
         let mut response = vec![];
         for (key, value) in index_map {
             let lonlat = decode(value.into_inner() as u64);
-            if (distance(point.clone(), lonlat) <= *radius){
+            if distance(point.clone(), lonlat) <= *radius{
                 response.push(Value::Bulk(key.clone()));
             }
         }
@@ -160,7 +158,7 @@ impl ZSetStore {
         (lon >= MIN_LONGITUDE && lon <= MAX_LONGITUDE) && (lat >= MIN_LATITUDE && lat <= MAX_LATITUDE)
     }
 
-    fn sort(&self, index_map : &mut IndexMap<String, OrderedFloat<f64>> , set_name: &str) {
+    fn sort(&self, index_map : &mut IndexMap<String, OrderedFloat<f64>> , _: &str) {
         index_map.sort_by(|k1, v1, k2, v2|
             v1.cmp(v2).then_with(|| k1.cmp(k2))
         );

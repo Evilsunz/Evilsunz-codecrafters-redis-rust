@@ -8,10 +8,9 @@ pub mod channels;
 mod zset;
 mod geo_serde;
 pub mod acl;
+mod locking;
 
-use std::any::type_name;
 use std::collections::HashMap;
-use anyhow::{Context, Result, bail};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -210,17 +209,17 @@ impl ReplicaInstance {
         loop {
             let mut buffer = [0; BUFFER_SIZE];
             reader.read(&mut buffer)?;
-            let (offset , commands) = self.parse_buffer_into_commands(&mut buffer);
+            let (_ , commands) = self.parse_buffer_into_commands(&mut buffer);
             commands
                 .iter()
                 .for_each(|command_bytes| {
                     if let Some(decoded) = decode_resp_array(command_bytes) {
                         println!("Decoded command: {:?}", decoded);
-                        let mut handler = Handler::repl_from_command(decoded, self);
+                        let handler = Handler::repl_from_command(decoded, self);
                         let result =handler.process_command();
                         if !(handler.to_string().starts_with("Ping")
                             || handler.to_string().starts_with("Set")){
-                                stream.write_all(&result);
+                                let _ = stream.write_all(&result);
                         }
                         //todo!(" over assign in the loop ");
                         self.bytes_offset += command_bytes.len();
@@ -232,12 +231,12 @@ impl ReplicaInstance {
     pub fn parse_buffer_into_commands(&mut self, buffer: &mut [u8]) -> (usize,  Vec<Vec<u8>> ) {
         let mut reader = BufReader::new(buffer.as_ref());
         let mut vector: Vec<u8> = vec![];
-        reader.read_until(b'\0', &mut vector);
+        let _ = reader.read_until(b'\0', &mut vector);
         vector.remove(vector.len() - 1);
         let offset = vector.len();
         // Try to parse the entire buffer as a single RESP array
         if let Some(result) = try_parse_as_resp_array(&vector) {
-            if (result.get(0).unwrap().len() >= vector.len()){
+            if result.get(0).unwrap().len() >= vector.len(){
                 return (offset, result);
             }
         }
@@ -336,7 +335,7 @@ pub fn decode_resp_array(buf: &[u8]) -> Option<Vec<String>> {
     let mut decoder = Decoder::new(BufReader::new(buf));
     let decoded = match decoder.decode() {
         Ok(val) => val,
-        Err(e) => return None,
+        Err(_) => return None,
     };
     match decoded {
         Value::Array(array) => {
@@ -459,14 +458,10 @@ pub fn encode_buf_bulk(v: Vec<u8>) -> Vec<u8> {
     encode_value(RespBulkBuf(v))
 }
 
-fn type_of<T>(_: T) -> &'static str {
-    type_name::<T>()
-}
-
 pub fn generate_master_repl_id() -> String{
     rng()
         .sample_iter(&Alphanumeric)
-        .take(30)
+        .take(40)
         .map(|x| x as char)
         .collect()
 }

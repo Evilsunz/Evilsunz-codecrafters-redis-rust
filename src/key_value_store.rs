@@ -1,8 +1,8 @@
-use crate::{encode_bulk_string, encode_error, encode_int, encode_null, encode_str, encode_value, encode_vec, encode_vec_as_bulk, type_of, RespArray, RespArrayOfValue, RespArrayOfValueBulk, RespBulkString, RespNull, RespString, TXContext};
+use crate::{encode_bulk_string, encode_error, encode_int, encode_value, encode_vec, encode_vec_as_bulk, RespArrayOfValue, RespBulkString, RespNull};
 use resp::{encode, Value};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap};
 use std::convert::TryInto;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::watch;
 
@@ -19,7 +19,6 @@ pub struct KeyValueStore {
 const EX: &'static str = "EX";
 const PX: &'static str = "PX";
 const OK: &'static str = "OK";
-const NONE: &'static str = "none";
 const ERROR_NOT_INT: &str = "ERR value is not an integer or out of range";
 
 impl KeyValueStore {
@@ -217,9 +216,9 @@ impl KeyValueStore {
     }
 
     pub fn type_of(&self, key: &str) -> Option<String> {
-        let mut store = self.store.lock().unwrap();
+        let store = self.store.lock().unwrap();
         match store.get(key) {
-            Some(value) => Some("string".to_string()),
+            Some(_) => Some("string".to_string()),
             None => None,
         }
     }
