@@ -355,40 +355,43 @@ impl Handler<'_> {
 
             }
             Exec(tx_context) => {
-                if tx_context.borrow().is_active {
-                    let mut tx_context_borrowed = tx_context.borrow_mut();
-                    tx_context_borrowed.is_active = false;
-
-                    // println!("+++++ Versions in tx : {:?}" , tx_context_borrowed.watches);
-                    // VERSIONS.lock().unwrap().print_storage();
-                    let mut invalid = false;
-
-                    for w in tx_context_borrowed.watches.iter() {
-                        if !VERSIONS.lock().unwrap().is_version_same(w.key(), *w.value()) {
-                            invalid = true;
-                            break;
-                        }
-                    }
-
-                    if invalid {
-                        tx_context_borrowed.store.clear();
-                        tx_context_borrowed.watches.clear();
-                        println!(" +++++ HERE ");
-                        return encode(&Value::NullArray);
-                    }
-
-                    let mut final_output: Vec<Value> = vec!();
-                    for command in tx_context_borrowed.store.iter() {
-                        println!("Executing command: {:?}", command);
-                        let output = Handler::from_command(command.clone() , &mut TXContext::default() , &mut ReplicaInstance::default(),&mut Auth::default() ,None).process_command();
-                        final_output.push(decode_to_value(output));
-                    }
-                    tx_context_borrowed.store.clear();
-                    tx_context_borrowed.watches.clear();
-                    encode_vec_of_value(final_output)
-                } else {
-                    encode_error(ERROR_EXEC_WITHOUT_MULTI)
+                if !tx_context.borrow().is_active {
+                    return encode_error(ERROR_EXEC_WITHOUT_MULTI);
                 }
+
+                let mut tx = tx_context.borrow_mut();
+                tx.is_active = false;
+
+                let has_conflict = tx
+                    .watches
+                    .iter()
+                    .any(|w| !VERSIONS.lock().unwrap().is_version_same(w.key(), *w.value()));
+
+                if has_conflict {
+                    tx.store.clear();
+                    tx.watches.clear();
+                    return encode(&Value::NullArray);
+                }
+
+                let final_output: Vec<Value> = tx
+                    .store
+                    .iter()
+                    .cloned()
+                    .map(|command| {
+                        let output = Handler::from_command(
+                            command,
+                            &mut TXContext::default(),
+                            &mut ReplicaInstance::default(),
+                            &mut Auth::default(),
+                            None,
+                        ).process_command();
+                        decode_to_value(output)
+                    })
+                    .collect();
+
+                tx.store.clear();
+                tx.watches.clear();
+                encode_vec_of_value(final_output)
             },
             Watch(vec, tx_context) => watch(vec, tx_context),
             Unwatch(tx_context) => unwatch(tx_context),
