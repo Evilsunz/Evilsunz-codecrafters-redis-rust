@@ -8,8 +8,8 @@ pub mod channels;
 mod zset;
 mod geo_serde;
 pub mod acl;
-mod locking;
 pub mod versions;
+mod transactions;
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};

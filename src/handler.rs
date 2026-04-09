@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use crate::{decode_to_value, encode_error, encode_str, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
+use crate::{decode_to_value, encode_error, encode_str, encode_vec_of_value, transactions, RdbSettings, ReplicaInstance, TXContext};
 use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
@@ -8,7 +8,6 @@ use std::fmt;
 use log::error;
 use resp::{encode, Value};
 use crate::acl::{Auth, AUTH_STORE};
-use crate::locking::{unwatch, watch};
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::versions::VERSIONS;
@@ -339,64 +338,23 @@ impl Handler<'_> {
             XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
             XRead(timeout, map) => STREAM_STORE.get_xread(map.clone(), timeout.clone()),
             Keys => KV_STORE.keys(),
-            Multi => {
-                encode_str(OK)
-            },
-            Discard(tx_context) => {
-                if   tx_context.borrow().is_active  {
-                    let mut tx_context_borrowed = tx_context.borrow_mut();
-                    tx_context_borrowed.is_active = false;
-                    tx_context_borrowed.store.clear();
-                    tx_context_borrowed.watches.clear();
-                    encode_str(OK)
-                } else {
-                    encode_error(ERROR_DISCARD_WITHOUT_MULTI)
-                }
-
+            Multi | Exec(_) | Discard(_) | Watch(_, _) | Unwatch(_) | Queued => {
+                transactions::process(self)
             }
-            Exec(tx_context) => {
-                if !tx_context.borrow().is_active {
-                    return encode_error(ERROR_EXEC_WITHOUT_MULTI);
-                }
 
-                let mut tx = tx_context.borrow_mut();
-                tx.is_active = false;
-
-                let has_conflict = tx
-                    .watches
-                    .iter()
-                    .any(|w| !VERSIONS.lock().unwrap().is_version_same(w.key(), *w.value()));
-
-                if has_conflict {
-                    tx.store.clear();
-                    tx.watches.clear();
-                    return encode(&Value::NullArray);
-                }
-
-                let final_output: Vec<Value> = tx
-                    .store
-                    .iter()
-                    .cloned()
-                    .map(|command| {
-                        let output = Handler::from_command(
-                            command,
-                            &mut TXContext::default(),
-                            &mut ReplicaInstance::default(),
-                            &mut Auth::default(),
-                            None,
-                        ).process_command();
-                        decode_to_value(output)
-                    })
-                    .collect();
-
-                tx.store.clear();
-                tx.watches.clear();
-                encode_vec_of_value(final_output)
-            },
-            Watch(vec, tx_context) => watch(vec, tx_context),
-            Unwatch(tx_context) => unwatch(tx_context),
+            // ZAdd(_, _, _) | ZRank(_, _) | ZRange(_, _, _) | ZCard(_) | ZScore(_, _) | ZRem(_, _) => {
+            //     zset::process(self)
+            // }
+            // 
+            // WhoAmi(_) | GetUser(_) | SetUser(_, _, _) | AclAuth(_, _, _) => {
+            //     acl::process(self)
+            // }
+            // 
+            // Info(_, _) | ReplConf(_, _, _) | PSync(_, _, _) | Wait(_, _) => {
+            //     replication::process(self)
+            // }
+            
             Config(_, arg2, rdb_settings) => get_config(arg2.to_string(), rdb_settings.clone()),
-            Queued => crate::encode_str("QUEUED"),
             Info(_,ri) => get_info(ri.clone()),
             ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),
             PSync(_,_, ri) => psync(ri.clone()),
