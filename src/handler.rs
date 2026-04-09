@@ -359,12 +359,22 @@ impl Handler<'_> {
                     let mut tx_context_borrowed = tx_context.borrow_mut();
                     tx_context_borrowed.is_active = false;
 
-                    println!("+++++ Versions in tx : {:?}" , tx_context_borrowed.watches);
-                    VERSIONS.lock().unwrap().print_storage();
+                    // println!("+++++ Versions in tx : {:?}" , tx_context_borrowed.watches);
+                    // VERSIONS.lock().unwrap().print_storage();
+                    let mut invalid = false;
+
                     for w in tx_context_borrowed.watches.iter() {
                         if !VERSIONS.lock().unwrap().is_version_same(w.key(), *w.value()) {
-                            return encode(&Value::NullArray);
+                            invalid = true;
+                            break;
                         }
+                    }
+
+                    if invalid {
+                        tx_context_borrowed.store.clear();
+                        tx_context_borrowed.watches.clear();
+                        println!(" +++++ HERE ");
+                        return encode(&Value::NullArray);
                     }
 
                     let mut final_output: Vec<Value> = vec!();
@@ -373,6 +383,7 @@ impl Handler<'_> {
                         let output = Handler::from_command(command.clone() , &mut TXContext::default() , &mut ReplicaInstance::default(),&mut Auth::default() ,None).process_command();
                         final_output.push(decode_to_value(output));
                     }
+                    tx_context_borrowed.store.clear();
                     tx_context_borrowed.watches.clear();
                     encode_vec_of_value(final_output)
                 } else {
