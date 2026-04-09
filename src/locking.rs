@@ -18,3 +18,8 @@ pub fn watch(args: &Vec<String>, txcontext: &RefCell<&mut TXContext>) -> Vec<u8>
     }
     encode_string("OK".to_string())
 }
+
+pub fn unwatch(txcontext: &RefCell<&mut TXContext>) -> Vec<u8> {
+    txcontext.borrow_mut().watches.clear();
+    encode_string("OK".to_string())
+}

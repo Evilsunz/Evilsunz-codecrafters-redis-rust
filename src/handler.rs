@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{decode_to_value, encode_error, encode_str, encode_vec_of_value, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -8,7 +8,7 @@ use std::fmt;
 use log::error;
 use resp::{encode, Value};
 use crate::acl::{Auth, AUTH_STORE};
-use crate::locking::watch;
+use crate::locking::{unwatch, watch};
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::versions::VERSIONS;
@@ -21,6 +21,7 @@ pub enum Handler<'a> {
     Discard(RefCell<&'a mut TXContext>),
     Exec(RefCell<&'a mut TXContext>),
     Watch(Vec<String>, RefCell<&'a mut TXContext>),
+    Unwatch(RefCell<&'a mut TXContext>),
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
@@ -89,6 +90,7 @@ const MULTI: &str = "MULTI";
 const EXEC: &str = "EXEC";
 const DISCARD: &str = "DISCARD";
 const WATCH: &str = "WATCH";
+const UNWATCH: &str = "UNWATCH";
 //replication
 const INFO: &str = "INFO";
 const REPLCONF: &str = "REPLCONF";
@@ -154,6 +156,9 @@ impl Handler<'_> {
             },
             Some(WATCH) => {
                 Watch(vector, RefCell::new(tx_context))
+            },
+            Some(UNWATCH) => {
+                Unwatch(RefCell::new(tx_context))
             },
             Some(DISCARD) => {
                 Discard(RefCell::new(tx_context))
@@ -342,6 +347,7 @@ impl Handler<'_> {
                     let mut tx_context_borrowed = tx_context.borrow_mut();
                     tx_context_borrowed.is_active = false;
                     tx_context_borrowed.store.clear();
+                    tx_context_borrowed.watches.clear();
                     encode_str(OK)
                 } else {
                     encode_error(ERROR_DISCARD_WITHOUT_MULTI)
@@ -367,12 +373,14 @@ impl Handler<'_> {
                         let output = Handler::from_command(command.clone() , &mut TXContext::default() , &mut ReplicaInstance::default(),&mut Auth::default() ,None).process_command();
                         final_output.push(decode_to_value(output));
                     }
+                    tx_context_borrowed.watches.clear();
                     encode_vec_of_value(final_output)
                 } else {
                     encode_error(ERROR_EXEC_WITHOUT_MULTI)
                 }
             },
             Watch(vec, tx_context) => watch(vec, tx_context),
+            Unwatch(tx_context) => unwatch(tx_context),
             Config(_, arg2, rdb_settings) => get_config(arg2.to_string(), rdb_settings.clone()),
             Queued => crate::encode_str("QUEUED"),
             Info(_,ri) => get_info(ri.clone()),
