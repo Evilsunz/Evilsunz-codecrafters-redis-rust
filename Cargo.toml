@@ -18,5 +18,6 @@ log = "0.4.28"
 ordered-float = { version = "5.0", default-features = false }
 futures = "0.3.31"
 sha2 = "0.10"
+dashmap = "7.0.0-rc2"
 #thiserror = "1.0.32"                                # error handling
 #tokio = { version = "1.23.0", features = ["full"] } # async networking

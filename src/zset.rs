@@ -3,19 +3,23 @@ use std::sync::{LazyLock, Mutex};
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use resp::Value;
-use crate::{encode_bulk_str, encode_bulk_string, encode_error, encode_int, encode_null,encode_vec_of_value};
+use tokio::sync::mpsc::UnboundedSender;
+use crate::{encode_bulk_str, encode_bulk_string, encode_error, encode_int, encode_null, encode_vec_of_value};
 use crate::geo_serde::{decode, distance, encode, Coordinates, MAX_LATITUDE, MAX_LONGITUDE, MIN_LATITUDE, MIN_LONGITUDE};
+use crate::versions::VERSIONS;
 
 pub static ZSET_STORE: LazyLock<ZSetStore> = LazyLock::new(|| ZSetStore::new());
 
 pub struct ZSetStore {
     store: Mutex<HashMap<String, IndexMap<String, OrderedFloat<f64>>>>,
+    versions_sender: UnboundedSender<(String, String)>
 }
 
 impl ZSetStore {
     fn new() -> Self {
         Self {
             store: Mutex::new(HashMap::new()),
+            versions_sender : VERSIONS.lock().unwrap().sender()
         }
     }
 

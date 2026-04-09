@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::{thread};
 use tokio::sync::watch;
 use codecrafters_redis::channels::{PUBSUB};
+use codecrafters_redis::versions::{VERSIONS};
 use tokio::runtime::Runtime;
 
 #[derive(Parser, Debug)]
@@ -26,7 +27,8 @@ struct Args {
     dbfilename: Option<String>,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     println!("{:?}", args);
     let listener = TcpListener::bind(SocketAddr::new(
@@ -50,7 +52,6 @@ fn main() {
         },
         None => None
     };
-    
     let mut ri2 = ri.clone();
     if ri.is_replica {
         thread::spawn(move || {
@@ -58,6 +59,7 @@ fn main() {
             let _ = ri2.connect_to_master();
         });
     }
+    VERSIONS.lock().unwrap().start_listening();
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {

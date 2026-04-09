@@ -6,11 +6,12 @@ use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use log::error;
-use resp::Value;
+use resp::{encode, Value};
 use crate::acl::{Auth, AUTH_STORE};
 use crate::locking::watch;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
+use crate::versions::VERSIONS;
 use crate::zset::ZSET_STORE;
 
 #[derive(Debug)]
@@ -19,7 +20,7 @@ pub enum Handler<'a> {
     Multi,
     Discard(RefCell<&'a mut TXContext>),
     Exec(RefCell<&'a mut TXContext>),
-    Watch(RefCell<&'a mut TXContext>),
+    Watch(String, RefCell<&'a mut TXContext>),
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
@@ -151,7 +152,10 @@ impl Handler<'_> {
             Some(EXEC) => {
                 Exec(RefCell::new(tx_context))
             },
-            Some(WATCH) => Watch(RefCell::new(tx_context)),
+            Some(WATCH) => {
+                let arg =Self::parse_single_arg(&vector).unwrap_or_default();
+                Watch(arg, RefCell::new(tx_context))
+            },
             Some(DISCARD) => {
                 Discard(RefCell::new(tx_context))
             },
@@ -349,6 +353,15 @@ impl Handler<'_> {
                 if tx_context.borrow().is_active {
                     let mut tx_context_borrowed = tx_context.borrow_mut();
                     tx_context_borrowed.is_active = false;
+
+                    println!("+++++ Versions in tx : {:?}" , tx_context_borrowed.watches);
+                    VERSIONS.lock().unwrap().print_storage();
+                    for w in tx_context_borrowed.watches.iter() {
+                        if !VERSIONS.lock().unwrap().is_version_same(w.key(), *w.value()) {
+                            return encode(&Value::NullArray);
+                        }
+                    }
+
                     let mut final_output: Vec<Value> = vec!();
                     for command in tx_context_borrowed.store.iter() {
                         println!("Executing command: {:?}", command);
@@ -360,7 +373,7 @@ impl Handler<'_> {
                     encode_error(ERROR_EXEC_WITHOUT_MULTI)
                 }
             },
-            Watch(tx_context) => watch(tx_context),
+            Watch(arg, tx_context) => watch(arg.to_string(), tx_context),
             Config(_, arg2, rdb_settings) => get_config(arg2.to_string(), rdb_settings.clone()),
             Queued => crate::encode_str("QUEUED"),
             Info(_,ri) => get_info(ri.clone()),

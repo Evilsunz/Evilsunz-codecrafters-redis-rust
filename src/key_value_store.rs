@@ -4,19 +4,22 @@ use std::collections::{HashMap};
 use std::convert::TryInto;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::watch;
+use crate::versions::{VERSIONS};
 
 pub static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::new());
 
 pub struct KeyValueStore {
     store: Mutex<HashMap<String, String>>,
-    //int_store: Mutex<HashMap<String, i64>>,
     expire: Mutex<HashMap<String, u128>>,
     lists: Mutex<HashMap<String, Vec<String>>>,
     notifiers: Mutex<HashMap<String, watch::Sender<Option<String>>>>,
+    versions_sender: UnboundedSender<(String, String)>
 }
 
 const EX: &'static str = "EX";
+const STORAGE: &'static str = "KV";
 const PX: &'static str = "PX";
 const OK: &'static str = "OK";
 const ERROR_NOT_INT: &str = "ERR value is not an integer or out of range";
@@ -28,7 +31,7 @@ impl KeyValueStore {
             expire: Mutex::new(HashMap::new()),
             lists: Mutex::new(HashMap::new()),
             notifiers: Mutex::new(HashMap::new()),
-            // int_store: Mutex::new(HashMap::new()),
+            versions_sender : VERSIONS.lock().unwrap().sender()
         }
     }
 
@@ -187,7 +190,9 @@ impl KeyValueStore {
             }
         }
         let mut store = self.store.lock().unwrap();
+        let key_versions = key.clone();
         store.insert(key, value);
+        let _ = self.versions_sender.send((STORAGE.to_string(),key_versions));
         crate::encode_str(OK)
     }
 

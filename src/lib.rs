@@ -9,6 +9,7 @@ mod zset;
 mod geo_serde;
 pub mod acl;
 mod locking;
+pub mod versions;
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -16,6 +17,7 @@ use std::net::TcpStream;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
+use dashmap::DashMap;
 use resp::{encode, Decoder, Value};
 pub use crate::handler::Handler;
 use rand::{rng, Rng};
@@ -86,7 +88,8 @@ impl SendToReplica {
 #[derive(Debug, Clone)]
 pub struct TXContext {
     pub is_active: bool,
-    pub store: Vec<Vec<String>>
+    pub store: Vec<Vec<String>>,
+    pub watches : DashMap<String, usize>,
 }
 
 #[derive(Debug, Clone,Eq,PartialEq)]
@@ -309,6 +312,7 @@ impl Default for TXContext {
         TXContext {
             is_active: false,
             store: vec![],
+            watches: DashMap::new()
         }
     }
 }
