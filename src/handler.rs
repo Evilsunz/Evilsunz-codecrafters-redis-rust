@@ -20,7 +20,7 @@ pub enum Handler<'a> {
     Multi,
     Discard(RefCell<&'a mut TXContext>),
     Exec(RefCell<&'a mut TXContext>),
-    Watch(String, RefCell<&'a mut TXContext>),
+    Watch(Vec<String>, RefCell<&'a mut TXContext>),
     Echo(String),
     Set(String, String, Option<String>, Option<u128>),
     XAdd(String, String, Vec<String>),
@@ -153,8 +153,7 @@ impl Handler<'_> {
                 Exec(RefCell::new(tx_context))
             },
             Some(WATCH) => {
-                let arg =Self::parse_single_arg(&vector).unwrap_or_default();
-                Watch(arg, RefCell::new(tx_context))
+                Watch(vector, RefCell::new(tx_context))
             },
             Some(DISCARD) => {
                 Discard(RefCell::new(tx_context))
@@ -373,7 +372,7 @@ impl Handler<'_> {
                     encode_error(ERROR_EXEC_WITHOUT_MULTI)
                 }
             },
-            Watch(arg, tx_context) => watch(arg.to_string(), tx_context),
+            Watch(vec, tx_context) => watch(vec, tx_context),
             Config(_, arg2, rdb_settings) => get_config(arg2.to_string(), rdb_settings.clone()),
             Queued => crate::encode_str("QUEUED"),
             Info(_,ri) => get_info(ri.clone()),
