@@ -5,7 +5,8 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::{thread};
+use std::{fs, thread};
+use std::path::Path;
 use tokio::sync::watch;
 use codecrafters_redis::channels::{PUBSUB};
 use codecrafters_redis::versions::{VERSIONS};
@@ -66,13 +67,17 @@ async fn main() {
     };
 
 
-    let aof_settings = match args.appenddirname {
-        Some(appenddirname) => {
+    let aof_settings = match args.appendonly {
+        Some(appendonly) => {
+            if appendonly == "yes" {
+                let path = format!("{}/{}", args.dir.clone().unwrap(),args.appenddirname.clone().unwrap());
+                let _ = fs::create_dir_all(Path::new(&path));
+            }
             Some(
                 AOFSettings {
                     dir: args.dir.unwrap(),
-                    appenddirname,
-                    appendonly: args.appendonly.unwrap(),
+                    appenddirname : args.appenddirname.unwrap(),
+                    appendonly,
                     appendfilename: args.appendfilename.unwrap(),
                     appendfsync: args.appendfsync.unwrap(),
 
