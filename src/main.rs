@@ -74,6 +74,9 @@ async fn main() {
                 let _ = fs::create_dir_all(Path::new(&path));
                 let file_path = format!("{}/{}.1.incr.aof", path,args.appendfilename.clone().unwrap());
                 fs::File::create(file_path).unwrap();
+                let manifest_path = format!("{}/{}.manifest", path,args.appendfilename.clone().unwrap());
+                let mut manifest = fs::File::create(manifest_path).unwrap();
+                manifest.write_all(format!("file {}.1.incr.aof seq 1 type i", args.appendfilename.clone().unwrap()).as_bytes()).unwrap();
             }
             Some(
                 AOFSettings {
