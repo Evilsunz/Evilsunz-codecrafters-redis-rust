@@ -36,7 +36,7 @@ pub enum Handler<'a> {
     Type(String),
     Incr(String),
     Queued,
-    Config(String, String, RdbSettings),
+    Config(String, String, Option<RdbSettings>),
     Keys,
     //Subscribe
     Subscribe(String),
@@ -226,7 +226,7 @@ impl Handler<'_> {
             },
             Some(CONFIG) => {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
-                Config(arg1,arg2, rdb_settings.unwrap())
+                Config(arg1,arg2, rdb_settings)
             },
             Some(WAIT) => {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
