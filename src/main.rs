@@ -72,6 +72,8 @@ async fn main() {
             if appendonly == "yes" {
                 let path = format!("{}/{}", args.dir.clone().unwrap(),args.appenddirname.clone().unwrap());
                 let _ = fs::create_dir_all(Path::new(&path));
+                let file_path = format!("{}/{}.1.incr.aof", path,args.appendfilename.clone().unwrap());
+                fs::File::create(file_path).unwrap();
             }
             Some(
                 AOFSettings {
