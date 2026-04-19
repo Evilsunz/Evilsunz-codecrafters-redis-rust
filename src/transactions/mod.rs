@@ -79,6 +79,7 @@ fn run_queued_command(command: Vec<String>) -> Value {
         &mut ReplicaInstance::default(),
         &mut Auth::default(),
         None,
+        None
     )
     .process_command();
 

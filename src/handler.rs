@@ -1,16 +1,14 @@
 use indexmap::IndexMap;
-use crate::{decode_to_value, encode_error, encode_str, encode_vec_of_value, transactions, RdbSettings, ReplicaInstance, TXContext};
+use crate::{encode_str, transactions, AOFSettings, RdbSettings, ReplicaInstance, TXContext};
 use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use log::error;
-use resp::{encode, Value};
 use crate::acl::{Auth, AUTH_STORE};
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
-use crate::versions::VERSIONS;
 use crate::zset::ZSET_STORE;
 
 #[derive(Debug)]
@@ -36,7 +34,7 @@ pub enum Handler<'a> {
     Type(String),
     Incr(String),
     Queued,
-    Config(String, String, Option<RdbSettings>),
+    Config(String, String, Option<RdbSettings>, Option<AOFSettings>),
     Keys,
     //Subscribe
     Subscribe(String),
@@ -134,7 +132,12 @@ impl fmt::Display for Handler<'_> {
 
 impl Handler<'_> {
     //But default we must check auth for every command - but for now let's only use it in ACL ones
-    pub fn from_command<'a>(vector: Vec<String>, tx_context: &'a mut TXContext, ri: &mut ReplicaInstance, auth: &'a mut Auth, rdb_settings: Option<RdbSettings>) -> Handler<'a> {
+    pub fn from_command<'a>(vector: Vec<String>,
+                            tx_context: &'a mut TXContext,
+                            ri: &mut ReplicaInstance,
+                            auth: &'a mut Auth,
+                            rdb_settings: Option<RdbSettings>,
+                            aof_settings: Option<AOFSettings>) -> Handler<'a> {
         let command = vector.first().map(|s| s.as_str());
 
         if tx_context.is_active && !matches!(command, Some(EXEC | DISCARD | WATCH)) {
@@ -226,7 +229,7 @@ impl Handler<'_> {
             },
             Some(CONFIG) => {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
-                Config(arg1,arg2, rdb_settings)
+                Config(arg1,arg2, rdb_settings, aof_settings)
             },
             Some(WAIT) => {
                 let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
@@ -354,7 +357,7 @@ impl Handler<'_> {
             //     replication::process(self)
             // }
             
-            Config(_, arg2, rdb_settings) => get_config(arg2.to_string(), rdb_settings.clone()),
+            Config(_, arg2, rdb_settings,aof_settings) => get_config(arg2.to_string(), rdb_settings.clone(), aof_settings.clone()),
             Info(_,ri) => get_info(ri.clone()),
             ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),
             PSync(_,_, ri) => psync(ri.clone()),
@@ -424,7 +427,7 @@ impl Handler<'_> {
     fn parse_set_user(vector: &[String]) -> Option<(String, String)> {
         let passwd = vector.get(3)?.clone();
         if !passwd.starts_with(">"){
-            //char > what else ?
+            //char > what else?
             error!("Password not starts with > ")
         }
         let passwd = passwd.strip_prefix(">").unwrap();

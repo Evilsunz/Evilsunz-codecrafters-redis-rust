@@ -27,7 +27,7 @@ impl VersionKeeper {
         let storage = Arc::clone(&self.storage);
 
         tokio::spawn(async move {
-            while let Some((map, key)) = rx.recv().await {
+            while let Some((_map, key)) = rx.recv().await {
                 let key = format!("{}", key);
                 let mut count = storage.entry(key.clone()).or_insert(0);
                 *count += 1;

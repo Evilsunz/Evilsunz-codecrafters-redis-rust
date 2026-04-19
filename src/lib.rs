@@ -52,6 +52,15 @@ pub struct RdbSettings{
     pub filename : String,
 }
 
+#[derive(Clone, Debug)]
+pub struct AOFSettings{
+    pub appendonly : String,
+    pub appenddirname : String,
+    pub dir : String,
+    pub appendfilename : String,
+    pub appendfsync : String,
+}
+
 pub struct ReplicaStore {
     pub notifiers: Mutex<HashMap<String, watch::Sender<Option<Vec<u8>>>>>,
 }

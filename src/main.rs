@@ -1,5 +1,5 @@
 use clap::Parser;
-use codecrafters_redis::{decode_resp_array, encode_int, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
+use codecrafters_redis::{decode_resp_array, encode_int, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, AOFSettings, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
 use codecrafters_redis::acl::Auth;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
@@ -20,11 +20,23 @@ struct Args {
     #[arg(short, long)]
     replicaof: Option<String>,
 
-    #[arg(short, long)]
+    #[arg(short, long,default_value ="/app")]
     dir: Option<String>,
 
     #[arg(short, long)]
     dbfilename: Option<String>,
+
+    #[arg(short, long, default_value = "no")]
+    appendonly: Option<String>,
+
+    #[arg(short, long, default_value = "appendonlydir")]
+    appenddirname: Option<String>,
+
+    #[arg(short, long, default_value = "appendonly.aof")]
+    appendfilename: Option<String>,
+
+    #[arg(short, long, default_value = "everysec")]
+    appendfsync: Option<String>,
 }
 
 #[tokio::main]
@@ -45,13 +57,31 @@ async fn main() {
         Some(dbfilename) => {
             Some(
                 RdbSettings {
-                    dir: args.dir.unwrap(),
+                    dir: args.dir.clone().unwrap(),
                     filename: dbfilename.clone(),
                 }
             )
         },
         None => None
     };
+
+
+    let aof_settings = match args.appenddirname {
+        Some(appenddirname) => {
+            Some(
+                AOFSettings {
+                    dir: args.dir.unwrap(),
+                    appenddirname,
+                    appendonly: args.appendonly.unwrap(),
+                    appendfilename: args.appendfilename.unwrap(),
+                    appendfsync: args.appendfsync.unwrap(),
+
+                }
+            )
+        },
+        None => None
+    };
+
     let mut ri2 = ri.clone();
     if ri.is_replica {
         thread::spawn(move || {
@@ -65,8 +95,9 @@ async fn main() {
             Ok(stream) => {
                 let ri_clone = ri.clone();
                 let rdb_clone = rdb_settings.clone();
+                let aof_clone = aof_settings.clone();
                 thread::spawn(move || {
-                    handle_stream(stream.try_clone().unwrap(), ri_clone, rdb_clone);
+                    handle_stream(stream.try_clone().unwrap(), ri_clone, rdb_clone,aof_clone);
                 });
             }
             Err(e) => {
@@ -109,7 +140,7 @@ async fn main() {
                         vec_command.push(value.as_string().unwrap());
                     }
 
-                    Handler::from_command(vec_command, tx_context, ri,&mut Auth::default(), Some(settings.clone()))
+                    Handler::from_command(vec_command, tx_context, ri,&mut Auth::default(), Some(settings.clone()), None)
                         .process_command();
                 }
             }
@@ -117,7 +148,7 @@ async fn main() {
         Ok(())
     }
 
-    fn handle_stream(mut stream: TcpStream, mut ri: ReplicaInstance, rdb_settings: Option<RdbSettings>) {
+    fn handle_stream(mut stream: TcpStream, mut ri: ReplicaInstance, rdb_settings: Option<RdbSettings>, aof_settings: Option<AOFSettings>) {
         let mut tx_context = TXContext::default();
         let mut auth = Auth::default();
         let rdb_settings_clone = rdb_settings.clone();
@@ -144,7 +175,7 @@ async fn main() {
             let command = decoded_command.get(0).unwrap().clone();
             println!("Decoded +++++ {:?}", decoded_command);
 
-            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, &mut auth, rdb_settings_clone.clone());
+            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, &mut auth, rdb_settings_clone.clone(), aof_settings.clone());
             println!("Handling {:?}", handler);
             let handler_name = handler.to_string();
             let response = handler.process_command();
