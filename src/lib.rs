@@ -1,31 +1,32 @@
+pub mod acl;
+pub mod channels;
+mod geo_serde;
 mod handler;
 mod key_value_store;
-mod stream_store;
-mod replication;
-mod rdb_parser;
 mod rdb;
-pub mod channels;
-mod zset;
-mod geo_serde;
-pub mod acl;
-pub mod versions;
+mod rdb_parser;
+mod replication;
+mod stream_store;
 mod transactions;
+pub mod versions;
+mod zset;
 
+pub use crate::handler::Handler;
+pub use crate::rdb_parser::parse_rdb_by_config;
+pub use crate::replication::get_rdb_file;
+pub use crate::replication::ReplicaStream;
+use dashmap::DashMap;
+use rand::distr::Alphanumeric;
+use rand::{rng, Rng};
+use resp::{encode, Decoder, Value};
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
-use dashmap::DashMap;
-use resp::{encode, Decoder, Value};
-pub use crate::handler::Handler;
-use rand::{rng, Rng};
-use rand::distr::Alphanumeric;
 use tokio::sync::watch;
-pub use crate::replication::get_rdb_file;
-pub use crate::replication::ReplicaStream;
-pub use crate::rdb_parser::parse_rdb_by_config;
 
 const PING: &str = "PING";
 const REPL_CONF1_1: &str = "REPLCONF";
@@ -40,25 +41,28 @@ const PSYNC3: &str = "-1";
 const BUFFER_SIZE: usize = 512;
 const RDB_HEADER_SIZE: usize = 88;
 
-pub static REPLICA_STREAMS: LazyLock<Arc<Mutex<Vec<ReplicaStream>>>> = LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
+pub static REPLICA_STREAMS: LazyLock<Arc<Mutex<Vec<ReplicaStream>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
 
-pub static SET_OPTS_SEND_TO_REPLICA: LazyLock<Mutex<SendToReplica>> = LazyLock::new(|| Mutex::new(SendToReplica::new()));
+pub static SET_OPTS_SEND_TO_REPLICA: LazyLock<Mutex<SendToReplica>> =
+    LazyLock::new(|| Mutex::new(SendToReplica::new()));
 
 pub static REPLICA_STORE: LazyLock<ReplicaStore> = LazyLock::new(|| ReplicaStore::new());
 
 #[derive(Clone, Debug)]
-pub struct RdbSettings{
-    pub dir : String,
-    pub filename : String,
+pub struct RdbSettings {
+    pub dir: String,
+    pub filename: String,
 }
 
 #[derive(Clone, Debug)]
-pub struct AOFSettings{
-    pub appendonly : String,
-    pub appenddirname : String,
-    pub dir : String,
-    pub appendfilename : String,
-    pub appendfsync : String,
+pub struct AOFSettings {
+    pub appendonly: String,
+    pub appenddirname: String,
+    pub dir: String,
+    pub appendfilename: String,
+    pub appendfsync: String,
+    pub aof_file: Option<Arc<Mutex<File>>>,
 }
 
 pub struct ReplicaStore {
@@ -69,6 +73,16 @@ impl ReplicaStore {
     fn new() -> Self {
         Self {
             notifiers: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl AOFSettings {
+    pub fn append_to_file(&self, command: Vec<String>) {
+        if let Some(aof) = &self.aof_file {
+            let mut file = aof.lock().unwrap();
+            file.write_all(&encode_vec_as_bulk(command)).unwrap();
+            file.flush().unwrap();
         }
     }
 }
@@ -98,40 +112,43 @@ impl SendToReplica {
 pub struct TXContext {
     pub is_active: bool,
     pub store: Vec<Vec<String>>,
-    pub watches : DashMap<String, usize>,
+    pub watches: DashMap<String, usize>,
 }
 
-#[derive(Debug, Clone,Eq,PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ReplicaInstance {
     pub is_replica: bool,
     pub master_ip: String,
     pub master_port: u16,
     pub own_port: u16,
     role: String,
-    master_replid : String,
+    master_replid: String,
     master_repl_offset: u16,
-    bytes_offset: usize
+    bytes_offset: usize,
 }
 
 impl ReplicaInstance {
     pub fn create_replica(master_ip: String, own_port: u16) -> Self {
         println!("Replica of {}", master_ip);
-        let ( master_ip ,master_port) = master_ip.split_at(master_ip.find(' ').unwrap());
+        let (master_ip, master_port) = master_ip.split_at(master_ip.find(' ').unwrap());
         let master_port = master_port[1..].parse::<u16>().unwrap();
         ReplicaInstance {
             is_replica: true,
             master_ip: master_ip.to_string(),
             master_port,
             own_port,
-            role : String::from("slave"),
-            master_replid : String::from("0000000000000000000000000000000000000000"),
+            role: String::from("slave"),
+            master_replid: String::from("0000000000000000000000000000000000000000"),
             master_repl_offset: 0,
-            bytes_offset: 0
+            bytes_offset: 0,
         }
     }
 
     pub fn get_info(&self) -> String {
-        format!("role:{} master_replid:{} master_repl_offset:{}", self.role, self.master_replid, self.master_repl_offset)
+        format!(
+            "role:{} master_replid:{} master_repl_offset:{}",
+            self.role, self.master_replid, self.master_repl_offset
+        )
     }
 
     pub fn connect_to_master(&mut self) -> anyhow::Result<()> {
@@ -155,7 +172,11 @@ impl ReplicaInstance {
         Ok(())
     }
 
-    fn send_and_receive(&self, stream: &mut TcpStream, command: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    fn send_and_receive(
+        &self,
+        stream: &mut TcpStream,
+        command: Vec<u8>,
+    ) -> anyhow::Result<Vec<u8>> {
         stream.write_all(&command)?;
         let mut buffer = [0; BUFFER_SIZE];
         stream.read(&mut buffer)?;
@@ -165,7 +186,10 @@ impl ReplicaInstance {
     fn send_ping(&self, stream: &mut TcpStream) -> anyhow::Result<()> {
         let ping = encode_vec_as_bulk(vec![PING.to_string()]);
         let response = self.send_and_receive(stream, ping)?;
-        println!("Received ping response: {:?}", decode_slice_to_value(&response));
+        println!(
+            "Received ping response: {:?}",
+            decode_slice_to_value(&response)
+        );
         Ok(())
     }
 
@@ -176,7 +200,10 @@ impl ReplicaInstance {
             self.own_port.to_string(),
         ]);
         let response = self.send_and_receive(stream, repl_conf)?;
-        println!("Received REPLCONF listening-port response: {:?}", decode_slice_to_value(&response));
+        println!(
+            "Received REPLCONF listening-port response: {:?}",
+            decode_slice_to_value(&response)
+        );
         Ok(())
     }
 
@@ -197,7 +224,10 @@ impl ReplicaInstance {
             PSYNC3.to_string(),
         ]);
         let response = self.send_and_receive(stream, psync)?;
-        println!("Received PSYNC response: {:?}", decode_slice_to_value(&response));
+        println!(
+            "Received PSYNC response: {:?}",
+            decode_slice_to_value(&response)
+        );
         Ok(())
     }
 
@@ -212,35 +242,41 @@ impl ReplicaInstance {
 
         let mut rdb_content = [0; RDB_HEADER_SIZE];
         reader.read_exact(&mut rdb_content)?;
-        println!("Read RDB content: {:?}", String::from_utf8_lossy(&rdb_content));
+        println!(
+            "Read RDB content: {:?}",
+            String::from_utf8_lossy(&rdb_content)
+        );
 
         Ok(())
     }
 
-    fn process_replication_stream(&mut self, mut reader: BufReader<TcpStream>, stream: &mut TcpStream) -> anyhow::Result<()> {
+    fn process_replication_stream(
+        &mut self,
+        mut reader: BufReader<TcpStream>,
+        stream: &mut TcpStream,
+    ) -> anyhow::Result<()> {
         loop {
             let mut buffer = [0; BUFFER_SIZE];
             reader.read(&mut buffer)?;
-            let (_ , commands) = self.parse_buffer_into_commands(&mut buffer);
-            commands
-                .iter()
-                .for_each(|command_bytes| {
-                    if let Some(decoded) = decode_resp_array(command_bytes) {
-                        println!("Decoded command: {:?}", decoded);
-                        let handler = Handler::repl_from_command(decoded, self);
-                        let result =handler.process_command();
-                        if !(handler.to_string().starts_with("Ping")
-                            || handler.to_string().starts_with("Set")){
-                                let _ = stream.write_all(&result);
-                        }
-                        //todo!(" over assign in the loop ");
-                        self.bytes_offset += command_bytes.len();
+            let (_, commands) = self.parse_buffer_into_commands(&mut buffer);
+            commands.iter().for_each(|command_bytes| {
+                if let Some(decoded) = decode_resp_array(command_bytes) {
+                    println!("Decoded command: {:?}", decoded);
+                    let handler = Handler::repl_from_command(decoded, self);
+                    let result = handler.process_command();
+                    if !(handler.to_string().starts_with("Ping")
+                        || handler.to_string().starts_with("Set"))
+                    {
+                        let _ = stream.write_all(&result);
                     }
-                });
+                    //todo!(" over assign in the loop ");
+                    self.bytes_offset += command_bytes.len();
+                }
+            });
         }
     }
 
-    pub fn parse_buffer_into_commands(&mut self, buffer: &mut [u8]) -> (usize,  Vec<Vec<u8>> ) {
+    pub fn parse_buffer_into_commands(&mut self, buffer: &mut [u8]) -> (usize, Vec<Vec<u8>>) {
         let mut reader = BufReader::new(buffer.as_ref());
         let mut vector: Vec<u8> = vec![];
         let _ = reader.read_until(b'\0', &mut vector);
@@ -248,7 +284,7 @@ impl ReplicaInstance {
         let offset = vector.len();
         // Try to parse the entire buffer as a single RESP array
         if let Some(result) = try_parse_as_resp_array(&vector) {
-            if result.get(0).unwrap().len() >= vector.len(){
+            if result.get(0).unwrap().len() >= vector.len() {
                 return (offset, result);
             }
         }
@@ -263,12 +299,11 @@ impl ReplicaInstance {
 
         (offset, commands)
     }
-
 }
 
 fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
     let decoded = decode_resp_array(buffer);
-    if decoded.is_some(){
+    if decoded.is_some() {
         let entries_count = buffer.iter().filter(|&n| *n == b'*').count();
         if entries_count > 2 {
             return None;
@@ -280,7 +315,7 @@ fn try_parse_as_resp_array(buffer: &[u8]) -> Option<Vec<Vec<u8>>> {
 fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
     let mut result = Vec::new();
     let mut start = 0;
-    
+
     for i in 0..buffer.len() {
         if buffer[i] == b'*' {
             // Check if next byte is a digit
@@ -293,7 +328,7 @@ fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
             }
         }
     }
-    
+
     // Add remaining segment
     if start < buffer.len() {
         result.push(buffer[start..].to_vec());
@@ -302,16 +337,16 @@ fn split_buffer_by_delimiter(buffer: &[u8]) -> Vec<Vec<u8>> {
 }
 
 impl Default for ReplicaInstance {
-     fn default() -> Self {
+    fn default() -> Self {
         ReplicaInstance {
             is_replica: false,
             master_ip: String::new(),
             master_port: 0,
             own_port: 0,
-            role : String::from("master"),
-            master_replid : generate_master_repl_id(),
+            role: String::from("master"),
+            master_replid: generate_master_repl_id(),
             master_repl_offset: 0,
-            bytes_offset: 0
+            bytes_offset: 0,
         }
     }
 }
@@ -321,7 +356,7 @@ impl Default for TXContext {
         TXContext {
             is_active: false,
             store: vec![],
-            watches: DashMap::new()
+            watches: DashMap::new(),
         }
     }
 }
@@ -335,11 +370,11 @@ fn value_to_string(value: &Value) -> String {
     }
 }
 
-pub fn decode_to_value(vec : Vec<u8>) -> Value {
+pub fn decode_to_value(vec: Vec<u8>) -> Value {
     decode_slice_to_value(&vec)
 }
 
-pub fn decode_slice_to_value(slice : &[u8]) -> Value {
+pub fn decode_slice_to_value(slice: &[u8]) -> Value {
     let mut decoder = Decoder::new(BufReader::new(slice));
     decoder.decode().unwrap()
 }
@@ -352,9 +387,7 @@ pub fn decode_resp_array(buf: &[u8]) -> Option<Vec<String>> {
     };
     match decoded {
         Value::Array(array) => {
-            let strings = array.iter()
-                .map(value_to_string)
-                .collect::<Vec<String>>();
+            let strings = array.iter().map(value_to_string).collect::<Vec<String>>();
             Some(strings)
         }
         _ => None,
@@ -375,7 +408,6 @@ pub struct RespString(pub String);
 pub struct RespBulkString(pub String);
 pub struct RespError(pub String);
 pub struct RespBulkBuf(pub Vec<u8>);
-
 
 impl Into<Value> for RespNull {
     fn into(self) -> Value {
@@ -459,7 +491,10 @@ pub fn encode_vec(v: Vec<String>) -> Vec<u8> {
 }
 
 pub fn encode_vec_as_bulk(v: Vec<String>) -> Vec<u8> {
-    let values = v.iter().map(|s|Value::Bulk(s.to_string())).collect::<Vec<Value>>();
+    let values = v
+        .iter()
+        .map(|s| Value::Bulk(s.to_string()))
+        .collect::<Vec<Value>>();
     encode_value(RespArrayOfValue(values))
 }
 
@@ -471,7 +506,7 @@ pub fn encode_buf_bulk(v: Vec<u8>) -> Vec<u8> {
     encode_value(RespBulkBuf(v))
 }
 
-pub fn generate_master_repl_id() -> String{
+pub fn generate_master_repl_id() -> String {
     rng()
         .sample_iter(&Alphanumeric)
         .take(40)

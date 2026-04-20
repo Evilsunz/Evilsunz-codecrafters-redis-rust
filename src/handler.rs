@@ -341,22 +341,7 @@ impl Handler<'_> {
             XRange(stream_name, start_id, end_id) => STREAM_STORE.get_xrange(stream_name.clone(), start_id.clone(), end_id.clone()),
             XRead(timeout, map) => STREAM_STORE.get_xread(map.clone(), timeout.clone()),
             Keys => KV_STORE.keys(),
-            Multi | Exec(_) | Discard(_) | Watch(_, _) | Unwatch(_) | Queued => {
-                transactions::process(self)
-            }
-
-            // ZAdd(_, _, _) | ZRank(_, _) | ZRange(_, _, _) | ZCard(_) | ZScore(_, _) | ZRem(_, _) => {
-            //     zset::process(self)
-            // }
-            // 
-            // WhoAmi(_) | GetUser(_) | SetUser(_, _, _) | AclAuth(_, _, _) => {
-            //     acl::process(self)
-            // }
-            // 
-            // Info(_, _) | ReplConf(_, _, _) | PSync(_, _, _) | Wait(_, _) => {
-            //     replication::process(self)
-            // }
-            
+            Multi | Exec(_) | Discard(_) | Watch(_, _) | Unwatch(_) | Queued => { transactions::process(self) }
             Config(_, arg2, rdb_settings,aof_settings) => get_config(arg2.to_string(), rdb_settings.clone(), aof_settings.clone()),
             Info(_,ri) => get_info(ri.clone()),
             ReplConf(arg1,arg2, ri) => repl_conf(arg1.clone(),arg2.clone(),ri.clone()),

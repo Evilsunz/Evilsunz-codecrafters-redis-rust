@@ -73,21 +73,30 @@ async fn main() {
                 let path = format!("{}/{}", args.dir.clone().unwrap(),args.appenddirname.clone().unwrap());
                 let _ = fs::create_dir_all(Path::new(&path));
                 let file_path = format!("{}/{}.1.incr.aof", path,args.appendfilename.clone().unwrap());
-                fs::File::create(file_path).unwrap();
+                let aof_file = fs::File::create(file_path).unwrap();
                 let manifest_path = format!("{}/{}.manifest", path,args.appendfilename.clone().unwrap());
                 let mut manifest = fs::File::create(manifest_path).unwrap();
                 manifest.write_all(format!("file {}.1.incr.aof seq 1 type i", args.appendfilename.clone().unwrap()).as_bytes()).unwrap();
-            }
-            Some(
-                AOFSettings {
+                Some(
+                    AOFSettings {
+                        dir: args.dir.unwrap(),
+                        appenddirname : args.appenddirname.unwrap(),
+                        appendonly,
+                        appendfilename: args.appendfilename.unwrap(),
+                        appendfsync: args.appendfsync.unwrap(),
+                        aof_file: Some(Arc::new(Mutex::new(aof_file)))
+                    }
+                )
+            } else {
+                Some(AOFSettings {
                     dir: args.dir.unwrap(),
                     appenddirname : args.appenddirname.unwrap(),
                     appendonly,
                     appendfilename: args.appendfilename.unwrap(),
                     appendfsync: args.appendfsync.unwrap(),
-
-                }
-            )
+                    aof_file: None
+                })
+            }
         },
         None => None
     };
@@ -184,7 +193,9 @@ async fn main() {
             let decoded_commandz = decoded_command.clone();
             let command = decoded_command.get(0).unwrap().clone();
             println!("Decoded +++++ {:?}", decoded_command);
-
+            if (aof_settings.is_some()){
+                aof_settings.as_ref().unwrap().append_to_file(decoded_commandz.clone());
+            }
             let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, &mut auth, rdb_settings_clone.clone(), aof_settings.clone());
             println!("Handling {:?}", handler);
             let handler_name = handler.to_string();
