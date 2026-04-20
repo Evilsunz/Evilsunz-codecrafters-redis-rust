@@ -513,3 +513,10 @@ pub fn generate_master_repl_id() -> String {
         .map(|x| x as char)
         .collect()
 }
+
+pub fn is_readonly_command(handler: &Handler) -> bool {
+    if matches!(handler, Handler::Ping | Handler::Echo(_) | Handler::Get(_)) {
+        return true;
+    }
+    false
+}

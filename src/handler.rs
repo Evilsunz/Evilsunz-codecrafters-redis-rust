@@ -115,12 +115,6 @@ const GETUSER: &str = "GETUSER";
 const SETUSER: &str = "SETUSER";
 const AUTH: &str = "AUTH";
 
-//misc
-const OK: &'static str = "OK";
-
-const ERROR_EXEC_WITHOUT_MULTI: &str = "ERR EXEC without MULTI";
-const ERROR_DISCARD_WITHOUT_MULTI: &str = "ERR DISCARD without MULTI";
-
 
 const BLOCK: &str = "block";
 

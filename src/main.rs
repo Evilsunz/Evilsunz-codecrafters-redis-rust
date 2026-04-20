@@ -1,5 +1,5 @@
 use clap::Parser;
-use codecrafters_redis::{decode_resp_array, encode_int, generate_master_repl_id, get_rdb_file, parse_rdb_by_config, set_send_to_replica, AOFSettings, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
+use codecrafters_redis::{decode_resp_array, encode_int, generate_master_repl_id, get_rdb_file, is_readonly_command, parse_rdb_by_config, set_send_to_replica, AOFSettings, Handler, RdbSettings, ReplicaInstance, ReplicaStream, TXContext, REPLICA_STORE, REPLICA_STREAMS};
 use codecrafters_redis::acl::Auth;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
@@ -193,10 +193,10 @@ async fn main() {
             let decoded_commandz = decoded_command.clone();
             let command = decoded_command.get(0).unwrap().clone();
             println!("Decoded +++++ {:?}", decoded_command);
-            if (aof_settings.is_some()){
+            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, &mut auth, rdb_settings_clone.clone(), aof_settings.clone());
+            if aof_settings.is_some() && !is_readonly_command(&handler){
                 aof_settings.as_ref().unwrap().append_to_file(decoded_commandz.clone());
             }
-            let handler = Handler::from_command(decoded_command, &mut tx_context, &mut ri, &mut auth, rdb_settings_clone.clone(), aof_settings.clone());
             println!("Handling {:?}", handler);
             let handler_name = handler.to_string();
             let response = handler.process_command();
