@@ -69,34 +69,12 @@ async fn main() {
 
     let aof_settings = match args.appendonly {
         Some(appendonly) => {
-            if appendonly == "yes" {
-                let path = format!("{}/{}", args.dir.clone().unwrap(),args.appenddirname.clone().unwrap());
-                let _ = fs::create_dir_all(Path::new(&path));
-                let file_path = format!("{}/{}.1.incr.aof", path,args.appendfilename.clone().unwrap());
-                let aof_file = fs::File::create(file_path).unwrap();
-                let manifest_path = format!("{}/{}.manifest", path,args.appendfilename.clone().unwrap());
-                let mut manifest = fs::File::create(manifest_path).unwrap();
-                manifest.write_all(format!("file {}.1.incr.aof seq 1 type i", args.appendfilename.clone().unwrap()).as_bytes()).unwrap();
-                Some(
-                    AOFSettings {
-                        dir: args.dir.unwrap(),
-                        appenddirname : args.appenddirname.unwrap(),
-                        appendonly,
-                        appendfilename: args.appendfilename.unwrap(),
-                        appendfsync: args.appendfsync.unwrap(),
-                        aof_file: Some(Arc::new(Mutex::new(aof_file)))
-                    }
-                )
-            } else {
-                Some(AOFSettings {
-                    dir: args.dir.unwrap(),
-                    appenddirname : args.appenddirname.unwrap(),
-                    appendonly,
-                    appendfilename: args.appendfilename.unwrap(),
-                    appendfsync: args.appendfsync.unwrap(),
-                    aof_file: None
-                })
-            }
+            Some(AOFSettings::new(
+                args.dir.unwrap(),
+                args.appenddirname.unwrap(),
+                args.appendfilename.unwrap(),
+                appendonly,
+                args.appendfsync.unwrap()))
         },
         None => None
     };

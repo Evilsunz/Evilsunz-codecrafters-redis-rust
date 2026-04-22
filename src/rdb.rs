@@ -13,13 +13,13 @@ pub fn get_config(arg2 : String, rdb_settings: Option<RdbSettings>, aof_settings
         if arg2.eq("dir") {
             encode_vec_as_bulk(vec!("dir".to_string(), aof_settings.dir))
         } else if arg2.eq("appendonly") {
-            encode_vec_as_bulk(vec!("appendonly".to_string(), aof_settings.appendonly))
+            encode_vec_as_bulk(vec!("appendonly".to_string(), aof_settings.append_only))
         } else if arg2.eq("appenddirname") {
-            encode_vec_as_bulk(vec!("appenddirname".to_string(), aof_settings.appenddirname))
+            encode_vec_as_bulk(vec!("appenddirname".to_string(), aof_settings.append_dir))
         } else if arg2.eq("appendfilename") {
-            encode_vec_as_bulk(vec!("appendfilename".to_string(), aof_settings.appendfilename))
+            encode_vec_as_bulk(vec!("appendfilename".to_string(), aof_settings.append_filename))
         } else if arg2.eq("appendfsync") {
-            encode_vec_as_bulk(vec!("appendfsync".to_string(), aof_settings.appendfsync))
+            encode_vec_as_bulk(vec!("appendfsync".to_string(), aof_settings.append_fsync))
         } else {
             encode_error("wrong args")
         }

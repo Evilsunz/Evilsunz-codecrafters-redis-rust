@@ -21,10 +21,11 @@ use rand::{rng, Rng};
 use resp::{encode, Decoder, Value};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::net::TcpStream;
+use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
-use std::thread;
+use std::{fs, thread};
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -57,11 +58,11 @@ pub struct RdbSettings {
 
 #[derive(Clone, Debug)]
 pub struct AOFSettings {
-    pub appendonly: String,
-    pub appenddirname: String,
+    pub append_only: String,
+    pub append_dir: String,
     pub dir: String,
-    pub appendfilename: String,
-    pub appendfsync: String,
+    pub append_filename: String,
+    pub append_fsync: String,
     pub aof_file: Option<Arc<Mutex<File>>>,
 }
 
@@ -78,6 +79,57 @@ impl ReplicaStore {
 }
 
 impl AOFSettings {
+    
+    pub fn new(dir: String, append_dir: String, append_filename: String, append_only : String, append_fsync : String) -> Self {
+        if append_only == "yes" {
+            let path = format!("{}/{}", dir ,append_dir);
+            let dir_path = Path::new(&path);
+            let aof_file;
+            if !dir_path.is_dir() {
+                let _ = fs::create_dir_all(Path::new(&path));
+                let file_path = format!("{}/{}.1.incr.aof", path,append_filename);
+                aof_file = fs::File::create(file_path).unwrap();
+                let manifest_path = format!("{}/{}.manifest", path,append_filename);
+                let mut manifest = fs::File::create(manifest_path).unwrap();
+                manifest.write_all(format!("file {}.1.incr.aof seq 1 type i", append_filename).as_bytes()).unwrap();
+                let mine = Self {
+                    dir,
+                    append_dir,
+                    append_only,
+                    append_filename,
+                    append_fsync,
+                    aof_file: Some(Arc::new(Mutex::new(aof_file))),
+                };
+                mine
+            } else {
+                let manifest_path_str = format!("{}/{}.manifest", path, append_filename);
+                let manifest_path = Path::new(&manifest_path_str);
+                let content = fs::read_to_string(manifest_path).unwrap();
+                let aof_file_name = format!("{}/{}", dir_path.to_str().unwrap(),content.split(' ').nth(1).unwrap().to_string() );
+                aof_file = File::open(aof_file_name).unwrap();
+                let mine = Self {
+                    dir,
+                    append_dir,
+                    append_only,
+                    append_filename,
+                    append_fsync,
+                    aof_file: Some(Arc::new(Mutex::new(aof_file))),
+                };
+                mine.restore_from_file();
+                mine
+            }
+        } else {
+            Self {
+                dir,
+                append_dir,
+                append_only,
+                append_filename,
+                append_fsync,
+                aof_file: None
+            }
+        }
+    }
+    
     pub fn append_to_file(&self, command: Vec<String>) {
         if let Some(aof) = &self.aof_file {
             let mut file = aof.lock().unwrap();
@@ -85,6 +137,40 @@ impl AOFSettings {
             file.flush().unwrap();
         }
     }
+
+    pub fn restore_from_file(&self) {
+        if let Some(aof) = &self.aof_file {
+            let mut file = aof.lock().unwrap();
+            file.seek(SeekFrom::Start(0)).unwrap();
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).unwrap();
+            let mut decoder = Decoder::new(BufReader::new(Cursor::new(buffer)));
+
+            loop {
+                match decoder.decode() {
+                    Ok(Value::Array(array)) => {
+                        let command = array
+                            .iter()
+                            .map(value_to_string)
+                            .collect::<Vec<String>>();
+
+                        println!("Restoring command: {:?}", command);
+
+                        let handler = Handler::repl_from_command(command, &mut ReplicaInstance::default());
+                        let _ = handler.process_command();
+                    }
+                    Ok(_) => {
+                        // Ignore non-array values
+                    }
+                    Err(_) => {
+                        // EOF or invalid trailing bytes
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 pub fn set_send_to_replica(value: bool) {
