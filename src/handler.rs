@@ -308,7 +308,7 @@ impl Handler<'_> {
                 .unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
             Some(REPLCONF) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(), String::new()));;
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(), String::new()));
                 ReplConf(arg1,arg2, ri.clone())
             },
             Some(PING) => Ping,
