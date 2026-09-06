@@ -20,7 +20,7 @@ impl BitMapStore {
     pub fn set_bit(&self, key : &str, offset: &String, value: &String) -> Vec<u8> {
         let offset = match offset.parse::<usize>() {
             Ok(num) => num,
-            Err(_) => return encode_error("Value must be a valid number (0 or 1)"),
+            Err(_) => return encode_error("Value must be a valid number"),
         };
         let value = match value.parse::<u8>() {
             Ok(num) => num,
@@ -35,7 +35,7 @@ impl BitMapStore {
                 let old_val = if *bit_vec.get(offset).unwrap() { 1 } else { 0 };
 
                 bit_vec.set(offset, true);
-                encode_int(&old_val) // Возвращаем 0 или 1
+                encode_int(&old_val)
             },
             0 => {
                 if offset >= bit_vec.len() {
@@ -44,7 +44,7 @@ impl BitMapStore {
                 let old_val = if *bit_vec.get(offset).unwrap() { 1 } else { 0 };
 
                 bit_vec.set(offset, false);
-                encode_int(&old_val) // Возвращаем 0 или 1
+                encode_int(&old_val)
             },
             _ => encode_error("ERR bit is not an integer or out of range"),
         }
