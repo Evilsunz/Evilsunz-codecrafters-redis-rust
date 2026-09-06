@@ -1,12 +1,13 @@
 use indexmap::IndexMap;
 use crate::{encode_str, transactions, AOFSettings, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use log::error;
 use crate::acl::{Auth, AUTH_STORE};
+use crate::bitmap::BITMAP_STORE;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::zset::ZSET_STORE;
@@ -61,6 +62,8 @@ pub enum Handler<'a> {
     GetUser(Auth),
     SetUser(RefCell<&'a mut Auth>, String, String),
     AclAuth(RefCell<&'a mut Auth>, String, String),
+    //BitMap
+    SetBit(String, String, String),
     Null,
 }
 
@@ -114,6 +117,8 @@ const WHOAMI: &str = "WHOAMI";
 const GETUSER: &str = "GETUSER";
 const SETUSER: &str = "SETUSER";
 const AUTH: &str = "AUTH";
+//BitMap
+const SET_BIT: &str = "SETBIT";
 
 
 const BLOCK: &str = "block";
@@ -182,7 +187,7 @@ impl Handler<'_> {
                 RPush(list_name, values)
             },
             Some(XRANGE) => {
-                let ( stream_name , start_id , end_id ) = Self::parse_three_args(&vector).unwrap_or_default();
+                let ( stream_name , start_id , end_id ) = Self::parse_three_args(&vector).unwrap_or_else(|| (String::new(),String::new(),String::new()));
                 XRange(stream_name, start_id, end_id)
             },
             Some(LPUSH) => {
@@ -214,44 +219,44 @@ impl Handler<'_> {
                 Info(arg, ri.clone())
             },
             Some(REPLCONF) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                 ReplConf(arg1,arg2, ri.clone())
             },
             Some(PSYNC) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                 PSync(arg1,arg2, ri.clone())
             },
             Some(CONFIG) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                 Config(arg1,arg2, rdb_settings, aof_settings)
             },
             Some(WAIT) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                 Wait(arg1.parse().unwrap_or_default(), arg2.parse().unwrap_or_default())
             },
             Some(ZADD) => {
-                let (arg1, arg2, arg3) =Self::parse_three_args(&vector).unwrap_or_default();
+                let (arg1, arg2, arg3) =Self::parse_three_args(&vector).unwrap_or_else(|| (String::new(),String::new(),String::new()));
                 ZAdd(arg1, arg2.parse().unwrap(), arg3)
             },
             Some(ZRANK) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                 ZRank(arg1, arg2)
             },
             Some(ZRANGE) => {
-                let (arg1, arg2, arg3) =Self::parse_three_args(&vector).unwrap_or_default();
+                let (arg1, arg2, arg3) =Self::parse_three_args(&vector).unwrap_or_else(|| (String::new(),String::new(),String::new()));
                 ZRange(arg1, arg2.parse().unwrap(), arg3.parse().unwrap())
             },
             Some(ZCARD) => Self::parse_single_arg(&vector).map(ZCard).unwrap_or(Null),
             Some(ZSCORE) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                 ZScore(arg1, arg2)
             },
             Some(ZREM) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                 ZRem(arg1, arg2)
             },
             Some(GEOADD) => {
-                let (set_name, lon , lat, place) =Self::parse_four_args(&vector).unwrap_or_default();
+                let (set_name, lon , lat, place) =Self::parse_four_args(&vector).unwrap_or_else(|| (String::new(),String::new(),String::new(),String::new() ));
                 GeoAdd(set_name, lon.parse().unwrap_or_default(), lat.parse().unwrap_or_default(), place)
             },
             Some(GEOPOS) => {
@@ -259,11 +264,11 @@ impl Handler<'_> {
                 GeoPos(set_name, places)
             },
             Some(GEODIST) => {
-                let (set_name, place1, place2) =Self::parse_three_args(&vector).unwrap_or_default();
+                let (set_name, place1, place2) =Self::parse_three_args(&vector).unwrap_or_else(|| (String::new(),String::new(),String::new()));
                 GeoDist(set_name, place1, place2)
             },
             Some(GEOSEARCH) => {
-                let (set_name, lon, lat, range, unit) =Self::parse_geosearch(&vector).unwrap_or_default();
+                let (set_name, lon, lat, range, unit) =Self::parse_geosearch(&vector).unwrap_or_else(|| (String::new(), 0 as f64,0 as f64,0 as f64,String::new() ));
                 GeoSearch(set_name, lon , lat , range , unit)
             },
             Some(ACL) => {
@@ -275,18 +280,22 @@ impl Handler<'_> {
                         GetUser(auth.clone())
                     },
                     Some(SETUSER) => {
-                        let (username, password) = Self::parse_set_user(&vector).unwrap_or_default();
+                        let (username, password) = Self::parse_set_user(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                         SetUser(RefCell::new(auth), username, password)
                     },
                     _ => Null
                 }
             },
             Some(AUTH) => {
-                let (username, password) = Self::parse_auth(&vector).unwrap_or_default();
+                let (username, password) = Self::parse_auth(&vector).unwrap_or_else(|| (String::new(),String::new() ));
                 println!(" +++++++ vec {:?} ", vector);
                 println!(" +++++++ passwd: {}", password);
                 println!(" +++++++ username: {}", username);
                 AclAuth(RefCell::new(auth), username, password)
+            },
+            Some(SET_BIT) => {
+                let ( stream_name , start_id , end_id ) = Self::parse_three_args(&vector).unwrap_or_else(|| (String::new(),String::new(),String::new()));
+                SetBit(stream_name, start_id, end_id)
             },
             _ => Null,
         }
@@ -299,7 +308,7 @@ impl Handler<'_> {
                 .unwrap_or(Null),
             Some(GET) => Self::parse_single_arg(&vector).map(Get).unwrap_or(Null),
             Some(REPLCONF) => {
-                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_default();
+                let (arg1, arg2) =Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(), String::new()));;
                 ReplConf(arg1,arg2, ri.clone())
             },
             Some(PING) => Ping,
@@ -355,6 +364,7 @@ impl Handler<'_> {
             GetUser(auth) => AUTH_STORE.get_user(auth.clone()),
             SetUser(auth,username, password) => AUTH_STORE.set_user(auth, username, password),
             AclAuth(auth,username, password) => AUTH_STORE.auth(auth, username, password),
+            SetBit(set_name, start, end) => BITMAP_STORE.set_bit(set_name, start, end),
             Null => crate::encode_str("Command not recognized"),
         }
     }

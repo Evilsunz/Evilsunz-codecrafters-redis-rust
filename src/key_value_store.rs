@@ -2,18 +2,22 @@ use crate::{encode_bulk_string, encode_error, encode_int, encode_value, encode_v
 use resp::{encode, Value};
 use std::collections::{HashMap};
 use std::convert::TryInto;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::watch;
+use tokio::sync::{watch};
 use crate::versions::{VERSIONS};
 
 pub static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::new());
 
+struct Store {
+    store: HashMap<String, String>,
+    lists: HashMap<String, Vec<String>>,
+    expire: HashMap<String, u128>,
+}
+
 pub struct KeyValueStore {
-    store: Mutex<HashMap<String, String>>,
-    expire: Mutex<HashMap<String, u128>>,
-    lists: Mutex<HashMap<String, Vec<String>>>,
+    store: RwLock<Store>,
     notifiers: Mutex<HashMap<String, watch::Sender<Option<String>>>>,
     versions_sender: UnboundedSender<(String, String)>
 }
@@ -27,9 +31,11 @@ const ERROR_NOT_INT: &str = "ERR value is not an integer or out of range";
 impl KeyValueStore {
     fn new() -> Self {
         Self {
-            store: Mutex::new(HashMap::new()),
-            expire: Mutex::new(HashMap::new()),
-            lists: Mutex::new(HashMap::new()),
+            store : RwLock::new(Store {
+                store: HashMap::new(),
+                lists: HashMap::new(),
+                expire: HashMap::new(),
+            }),
             notifiers: Mutex::new(HashMap::new()),
             versions_sender : VERSIONS.lock().unwrap().sender()
         }
@@ -81,7 +87,8 @@ impl KeyValueStore {
     }
 
     pub fn pop_first(&self, list_name: String, count: Option<u64>) -> Value {
-        let mut lists = self.lists.lock().unwrap();
+        let mut guard = self.store.write().unwrap();
+        let lists = &mut guard.lists;
         let inner_list = match lists.get_mut(&list_name) {
             Some(list) => list,
             None => return RespNull.into(),
@@ -104,7 +111,8 @@ impl KeyValueStore {
     }
 
     pub fn len(&self, list_name: String) -> Vec<u8> {
-        let lists = self.lists.lock().unwrap();
+        let guard = self.store.read().unwrap();
+        let lists = &guard.lists;
         let inner_list = match lists.get(&list_name) {
             Some(inner_list) => inner_list,
             None => return encode_int(&0),
@@ -113,7 +121,8 @@ impl KeyValueStore {
     }
 
     pub fn add_to_list(&self, list_name: String, mut values: Vec<String>) -> Vec<u8> {
-        let mut lists = self.lists.lock().unwrap();
+        let mut guard = self.store.write().unwrap();
+        let lists = &mut guard.lists;
         let internal_list = lists
             .entry(list_name.clone())
             .and_modify(|v| v.append(&mut values))
@@ -129,7 +138,8 @@ impl KeyValueStore {
     }
 
     pub fn add_to_list_left(&self, list_name: String, mut values: Vec<String>) -> Vec<u8> {
-        let mut lists = self.lists.lock().unwrap();
+        let mut guard = self.store.write().unwrap();
+        let lists = &mut guard.lists;
         values.reverse();
         let internal_list = lists
             .entry(list_name)
@@ -141,7 +151,8 @@ impl KeyValueStore {
     }
 
     pub fn list_range(&self, list_name: String, start: isize, end: isize) -> Vec<u8> {
-        let lists = self.lists.lock().unwrap();
+        let guard = self.store.read().unwrap();
+        let lists = &guard.lists;
         let inner_list = match lists.get(&list_name) {
             Some(inner_list) => inner_list,
             None => return encode_vec(vec![]),
@@ -155,7 +166,8 @@ impl KeyValueStore {
     }
 
     pub fn incr(&self, key: String) -> Vec<u8> {
-            let mut int_store = self.store.lock().unwrap();
+        let mut guard = self.store.write().unwrap();
+        let int_store = &mut guard.store;
             if let Some(existing_value) = int_store.get(&key) {
                 match existing_value.parse::<usize>() {
                     Ok(current) => {
@@ -181,7 +193,8 @@ impl KeyValueStore {
         if let (Some(unit), Some(duration)) = (expire_unit, expire_dur) {
             match self.calculate_expiration_time(&unit, duration) {
                 Ok(expire_time) => {
-                    let mut expire = self.expire.lock().unwrap();
+                    let mut guard = self.store.write().unwrap();
+                    let expire = &mut guard.expire;
                     expire.insert(key.clone(), expire_time);
                 }
                 Err(err_msg) => {
@@ -189,7 +202,8 @@ impl KeyValueStore {
                 }
             }
         }
-        let mut store = self.store.lock().unwrap();
+        let mut guard = self.store.write().unwrap();
+        let store = &mut guard.store;
         let key_versions = key.clone();
         store.insert(key, value);
         let _ = self.versions_sender.send((STORAGE.to_string(),key_versions));
@@ -197,7 +211,8 @@ impl KeyValueStore {
     }
 
     pub fn keys(&self) -> Vec<u8>{
-        let result = self.store.lock().unwrap().keys().map(|k| k.to_string()).collect::<Vec<String>>();
+        let guard = self.store.read().unwrap();
+        let result = guard.store.keys().map(|k| k.to_string()).collect::<Vec<String>>();
         encode_vec_as_bulk(result)
     }
     
@@ -221,7 +236,8 @@ impl KeyValueStore {
     }
 
     pub fn type_of(&self, key: &str) -> Option<String> {
-        let store = self.store.lock().unwrap();
+        let guard = self.store.read().unwrap();
+        let store = &guard.store;
         match store.get(key) {
             Some(_) => Some("string".to_string()),
             None => None,
@@ -229,8 +245,8 @@ impl KeyValueStore {
     }
 
     pub fn get(&self, key: &str) -> Vec<u8> {
-        let mut expire = self.expire.lock().unwrap();
-        let mut store = self.store.lock().unwrap();
+        let mut guard = self.store.write().unwrap();
+        let Store { store, expire, .. } = &mut *guard;
         if let Some(&stored_expiration) = expire.get(key) {
             if self.is_expired(stored_expiration) {
                 expire.remove(key);

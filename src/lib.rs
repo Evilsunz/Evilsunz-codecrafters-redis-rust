@@ -10,14 +10,13 @@ mod stream_store;
 mod transactions;
 pub mod versions;
 mod zset;
+mod bitmap;
 
 pub use crate::handler::Handler;
 pub use crate::rdb_parser::parse_rdb_by_config;
 pub use crate::replication::get_rdb_file;
 pub use crate::replication::ReplicaStream;
 use dashmap::DashMap;
-use rand::distr::Alphanumeric;
-use rand::{rng, Rng};
 use resp::{encode, Decoder, Value};
 use std::collections::HashMap;
 use std::fs::File;
@@ -28,6 +27,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::{fs, thread};
 use std::time::Duration;
 use tokio::sync::watch;
+use rand_distr::{Alphanumeric, Distribution};
 
 const PING: &str = "PING";
 const REPL_CONF1_1: &str = "REPLCONF";
@@ -593,10 +593,13 @@ pub fn encode_buf_bulk(v: Vec<u8>) -> Vec<u8> {
 }
 
 pub fn generate_master_repl_id() -> String {
-    rng()
-        .sample_iter(&Alphanumeric)
+    // В rand 0.10 вместо thread_rng() используется функция rand::rng()
+    let mut rng = rand::rng();
+
+    Alphanumeric
+        .sample_iter(&mut rng)
         .take(40)
-        .map(|x| x as char)
+        .map(|b| b as char)
         .collect()
 }
 
