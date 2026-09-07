@@ -427,8 +427,10 @@ impl KeyValueStore {
                 bv.resize(max_len_bits, false);
             }
         }
-        let mut result_bv = bitvecs[0].clone();
-
+        let mut result_bv = match bitvecs.first() {
+            Some(bv) => bv.clone(),
+            None => BitVec::<u8, Msb0>::new(),
+        };
         match op.as_str() {
             "AND" => {
                 for bv in bitvecs.iter().skip(1) {
@@ -442,6 +444,10 @@ impl KeyValueStore {
             }
             _ => return encode_error("ERR syntax error or unknown BITOP operation"),
         };
+        if max_len_bits == 0 {
+            self.store.insert(dest_key, String::new());
+            return encode_int(&0);
+        }
 
         let serialized = self.serialize_bitvec(&result_bv);
         let result_len_bytes = serialized.len();
