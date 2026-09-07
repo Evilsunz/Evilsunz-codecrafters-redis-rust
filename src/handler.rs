@@ -1,13 +1,12 @@
 use indexmap::IndexMap;
 use crate::{encode_str, transactions, AOFSettings, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit, GetBit};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit, GetBit, StrLen};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
 use std::fmt;
 use log::error;
 use crate::acl::{Auth, AUTH_STORE};
-use crate::bitmap::BITMAP_STORE;
 use crate::rdb::get_config;
 use crate::replication::{get_info, psync, repl_conf, wait};
 use crate::zset::ZSET_STORE;
@@ -65,6 +64,7 @@ pub enum Handler<'a> {
     //BitMap
     SetBit(String, String, String),
     GetBit(String, String),
+    StrLen(String),
     Null,
 }
 
@@ -121,6 +121,7 @@ const AUTH: &str = "AUTH";
 //BitMap
 const SET_BIT: &str = "SETBIT";
 const GET_BIT: &str = "GETBIT";
+const STR_LEN: &str = "STRLEN";
 
 
 const BLOCK: &str = "block";
@@ -303,6 +304,10 @@ impl Handler<'_> {
                 let ( key , offset ) = Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new()));
                 GetBit(key, offset)
             },
+            Some(STR_LEN) => {
+                let ( key ) = Self::parse_single_arg(&vector).unwrap_or_else(|| (String::new()));
+                StrLen(key)
+            },
             _ => Null,
         }
     }
@@ -372,6 +377,7 @@ impl Handler<'_> {
             AclAuth(auth,username, password) => AUTH_STORE.auth(auth, username, password),
             SetBit(key, offset, value) => KV_STORE.set_bit(key, offset, value),
             GetBit(key, offset) => KV_STORE.get_bit(key, offset),
+            StrLen(key) => KV_STORE.str_len(key),
             Null => encode_str("Command not recognized"),
         }
     }

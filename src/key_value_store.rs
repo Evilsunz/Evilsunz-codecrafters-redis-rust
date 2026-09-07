@@ -309,7 +309,10 @@ impl KeyValueStore {
 
         let mut bv = self.deserialize_bitvec(guard.value());
         if offset >= bv.len() {
-            bv.resize(offset + 1, false);
+            let required_bits = offset + 1;
+            let required_bytes = required_bits.div_ceil(8);
+            let aligned_bits = required_bytes * 8;
+            bv.resize(aligned_bits, false);
         }
         let old_bit = bv.replace(offset, bit_value);
 
@@ -338,9 +341,21 @@ impl KeyValueStore {
             }
         }
     }
-    
+
+    pub fn str_len(&self, key: &str) -> Vec<u8> {
+        match self.store.get(key) {
+            Some(guard) => {
+                let value = guard.value();
+                encode_int(&value.len())
+            }
+            None => {
+                encode_int(&0)
+            }
+        }
+    }
+
     pub fn serialize_bitvec(&self, bv: &BitVec<u8, Msb0>) -> String {
-        let bytes = bv.as_raw_slice(); // Получаем &[u8]
+        let bytes = bv.as_raw_slice();
         bytes.iter().map(|&b| b as char).collect()
     }
 

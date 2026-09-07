@@ -10,7 +10,6 @@ mod stream_store;
 mod transactions;
 pub mod versions;
 mod zset;
-mod bitmap;
 
 pub use crate::handler::Handler;
 pub use crate::rdb_parser::parse_rdb_by_config;
