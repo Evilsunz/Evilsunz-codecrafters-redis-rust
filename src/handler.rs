@@ -387,7 +387,7 @@ impl Handler<'_> {
             GetUser(auth) => AUTH_STORE.get_user(auth.clone()),
             SetUser(auth,username, password) => AUTH_STORE.set_user(auth, username, password),
             AclAuth(auth,username, password) => AUTH_STORE.auth(auth, username, password),
-            SetBit(key, offset, value) => KV_STORE.set_bit(key, offset, value),
+            SetBit(key, offset, value) => KV_STORE.set_bit(key.clone(), offset, value),
             GetBit(key, offset) => KV_STORE.get_bit(key, offset),
             StrLen(key) => KV_STORE.str_len(key),
             BitCount(key, start, end) => KV_STORE.bit_count(key, start, end),

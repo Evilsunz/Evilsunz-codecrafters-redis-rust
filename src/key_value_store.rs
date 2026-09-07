@@ -292,31 +292,36 @@ impl KeyValueStore {
         }
     }
 
-    pub fn set_bit(&self, key: &str, offset: &str, value: &str) -> Vec<u8> {
+    pub fn set_bit(&self, key: String, offset: &str, value: &str) -> Vec<u8> {
         let offset = match offset.parse::<usize>() {
             Ok(num) => num,
             Err(_) => return encode_error("Value must be a valid number"),
         };
+
         let bit_value = match value {
             "1" => true,
             "0" => false,
             _ => return encode_error("ERR bit is not an integer or out of range"),
         };
 
-        let mut guard = self.store.entry(key.to_string()).or_insert_with(|| {
+        let mut guard = self.store.entry(key).or_insert_with(|| {
             self.serialize_bitvec(&BitVec::<u8, Msb0>::new())
         });
 
         let mut bv = self.deserialize_bitvec(guard.value());
+
         if offset >= bv.len() {
             let required_bits = offset + 1;
-            let required_bytes = required_bits.div_ceil(8);
-            let aligned_bits = required_bytes * 8;
+            let aligned_bits = required_bits.div_ceil(8) * 8;
             bv.resize(aligned_bits, false);
         }
+
         let old_bit = bv.replace(offset, bit_value);
+        let final_len = bv.len().div_ceil(8) * 8;
+        bv.truncate(final_len);
 
         *guard.value_mut() = self.serialize_bitvec(&bv);
+
         let old_value = if old_bit { 1 } else { 0 };
         encode_int(&old_value)
     }
@@ -411,12 +416,11 @@ impl KeyValueStore {
         for key in &src_keys {
             if let Some(guard) = self.store.get(key) {
                 let string_value = guard.value();
-                let actual_len_bits = string_value.len() * 8;
+                let actual_len_bits = string_value.chars().count() * 8;
                 max_len_bits = std::cmp::max(max_len_bits, actual_len_bits);
 
                 let mut bv = self.deserialize_bitvec(string_value);
                 bv.resize(actual_len_bits, false);
-
                 bitvecs.push(bv);
             } else {
                 bitvecs.push(BitVec::<u8, Msb0>::new());
@@ -445,14 +449,17 @@ impl KeyValueStore {
             _ => return encode_error("ERR syntax error or unknown BITOP operation"),
         };
         result_bv.truncate(max_len_bits);
+        if result_bv.len() < max_len_bits {
+            result_bv.resize(max_len_bits, false);
+        }
         if max_len_bits == 0 {
             self.store.insert(dest_key, String::new());
             return encode_int(&0);
         }
+        
         let serialized = self.serialize_bitvec(&result_bv);
-        let result_len_bytes = serialized.len();
-
         self.store.insert(dest_key, serialized);
+        let result_len_bytes = max_len_bits / 8;
         encode_int(&(result_len_bytes))
     }
 
