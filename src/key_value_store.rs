@@ -354,11 +354,64 @@ impl KeyValueStore {
         }
     }
 
+    pub fn bit_count(&self, key: &str, start: &Option<i64>, end: &Option<i64>) -> Vec<u8> {
+        let guard = match self.store.get(key) {
+            Some(g) => g,
+            None => return encode_int(&0),
+        };
+        let bv = self.deserialize_bitvec(guard.value());
+        let total_bytes = bv.len() / 8;
+
+        if total_bytes == 0 {
+            return encode_int(&0);
+        }
+
+        if start.is_none() || end.is_none() {
+            return encode_int(&(bv.count_ones()));
+        }
+
+        let s_val = start.unwrap();
+        let e_val = end.unwrap();
+
+        let resolve_index = |pos: i64, max_len: i64| -> i64 {
+            if pos < 0 {
+                let calculated = max_len + pos;
+                if calculated < 0 { 0 } else { calculated }
+            } else {
+                pos
+            }
+        };
+
+        let start_byte = resolve_index(s_val, total_bytes as i64);
+        let end_byte = resolve_index(e_val, total_bytes as i64);
+
+        if start_byte >= total_bytes as i64 || start_byte > end_byte {
+            return encode_int(&0);
+        }
+
+        let end_byte = std::cmp::min(end_byte, (total_bytes - 1) as i64);
+        let start_bit = (start_byte as usize) * 8;
+        let end_bit = ((end_byte as usize) + 1) * 8;
+
+        let end_bit = std::cmp::min(end_bit, bv.len());
+
+        let count = bv[start_bit..end_bit].count_ones();
+        encode_int(&(count))
+    }
+
+
     pub fn serialize_bitvec(&self, bv: &BitVec<u8, Msb0>) -> String {
-        let byte_count = bv.len() / 8;
-        let raw_bytes = bv.as_raw_slice();
-        let actual_bytes = &raw_bytes[..byte_count];
-        actual_bytes.iter().map(|&b| b as char).collect()
+        let mut bytes = Vec::new();
+        for chunk in bv.chunks(8) {
+            let mut byte = 0u8;
+            for (i, bit) in chunk.iter().enumerate() {
+                if *bit {
+                    byte |= 1 << (7 - i);
+                }
+            }
+            bytes.push(byte);
+        }
+        bytes.iter().map(|&b| b as char).collect()
     }
 
 

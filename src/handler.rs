@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{encode_str, transactions, AOFSettings, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit, GetBit, StrLen};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit, GetBit, StrLen, BitCount};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -65,6 +65,7 @@ pub enum Handler<'a> {
     SetBit(String, String, String),
     GetBit(String, String),
     StrLen(String),
+    BitCount(String, Option<i64>, Option<i64>),
     Null,
 }
 
@@ -122,6 +123,7 @@ const AUTH: &str = "AUTH";
 const SET_BIT: &str = "SETBIT";
 const GET_BIT: &str = "GETBIT";
 const STR_LEN: &str = "STRLEN";
+const BIT_COUNT: &str = "BITCOUNT";
 
 
 const BLOCK: &str = "block";
@@ -305,8 +307,12 @@ impl Handler<'_> {
                 GetBit(key, offset)
             },
             Some(STR_LEN) => {
-                let key = Self::parse_single_arg(&vector).unwrap_or_else(|| (String::new()));
+                let key = Self::parse_single_arg(&vector).unwrap_or_else(|| String::new());
                 StrLen(key)
+            },
+            Some(BIT_COUNT) => {
+                let (key , start, end ) = Self::parse_three_args_with_options(&vector).unwrap_or_else(|| (String::new(), None, None));
+                BitCount(key, start, end)
             },
             _ => Null,
         }
@@ -378,6 +384,7 @@ impl Handler<'_> {
             SetBit(key, offset, value) => KV_STORE.set_bit(key, offset, value),
             GetBit(key, offset) => KV_STORE.get_bit(key, offset),
             StrLen(key) => KV_STORE.str_len(key),
+            BitCount(key, start, end) => KV_STORE.bit_count(key, start, end),
             Null => encode_str("Command not recognized"),
         }
     }
@@ -405,6 +412,14 @@ impl Handler<'_> {
             vector.get(3).cloned(),
             vector.get(4).and_then(|s| s.parse().ok())
         ))
+    }
+
+    fn parse_three_args_with_options(vector: &[String]) -> Option<(String, Option<i64>, Option<i64>)> {
+        Some((
+            vector.get(1)?.clone(),
+            vector.get(2).and_then(|s| s.parse().ok()),
+            vector.get(3).and_then(|s| s.parse().ok())
+            ))
     }
 
     fn parse_four_args(vector: &[String]) -> Option<(String, String, String, String)> {
