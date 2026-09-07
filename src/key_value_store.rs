@@ -355,8 +355,10 @@ impl KeyValueStore {
     }
 
     pub fn serialize_bitvec(&self, bv: &BitVec<u8, Msb0>) -> String {
-        let bytes = bv.as_raw_slice();
-        bytes.iter().map(|&b| b as char).collect()
+        let byte_count = bv.len() / 8;
+        let raw_bytes = bv.as_raw_slice();
+        let actual_bytes = &raw_bytes[..byte_count];
+        actual_bytes.iter().map(|&b| b as char).collect()
     }
 
 

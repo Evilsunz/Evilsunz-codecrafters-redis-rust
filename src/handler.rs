@@ -305,7 +305,7 @@ impl Handler<'_> {
                 GetBit(key, offset)
             },
             Some(STR_LEN) => {
-                let ( key ) = Self::parse_single_arg(&vector).unwrap_or_else(|| (String::new()));
+                let key = Self::parse_single_arg(&vector).unwrap_or_else(|| (String::new()));
                 StrLen(key)
             },
             _ => Null,
