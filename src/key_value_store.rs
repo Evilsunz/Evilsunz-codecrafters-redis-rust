@@ -444,11 +444,11 @@ impl KeyValueStore {
             }
             _ => return encode_error("ERR syntax error or unknown BITOP operation"),
         };
+        result_bv.truncate(max_len_bits);
         if max_len_bits == 0 {
             self.store.insert(dest_key, String::new());
             return encode_int(&0);
         }
-
         let serialized = self.serialize_bitvec(&result_bv);
         let result_len_bytes = serialized.len();
 
