@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{encode_str, transactions, AOFSettings, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit, GetBit, StrLen, BitCount};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit, GetBit, StrLen, BitCount, BitOp};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -66,6 +66,7 @@ pub enum Handler<'a> {
     GetBit(String, String),
     StrLen(String),
     BitCount(String, Option<i64>, Option<i64>),
+    BitOp(String, String, Vec<String>),
     Null,
 }
 
@@ -124,6 +125,7 @@ const SET_BIT: &str = "SETBIT";
 const GET_BIT: &str = "GETBIT";
 const STR_LEN: &str = "STRLEN";
 const BIT_COUNT: &str = "BITCOUNT";
+const BIT_OP: &str = "BITOP";
 
 
 const BLOCK: &str = "block";
@@ -314,6 +316,10 @@ impl Handler<'_> {
                 let (key , start, end ) = Self::parse_three_args_with_options(&vector).unwrap_or_else(|| (String::new(), None, None));
                 BitCount(key, start, end)
             },
+            Some(BIT_OP) => {
+                let (operation, dest, src) = Self::parse_two_and_list_args(&vector);
+                BitOp(operation, dest, src)
+            },
             _ => Null,
         }
     }
@@ -385,6 +391,7 @@ impl Handler<'_> {
             GetBit(key, offset) => KV_STORE.get_bit(key, offset),
             StrLen(key) => KV_STORE.str_len(key),
             BitCount(key, start, end) => KV_STORE.bit_count(key, start, end),
+            BitOp(operation, dest, src) => KV_STORE.bit_op(operation, dest.clone(), src.clone()),
             Null => encode_str("Command not recognized"),
         }
     }

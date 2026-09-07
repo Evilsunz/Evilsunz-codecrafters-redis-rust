@@ -400,24 +400,82 @@ impl KeyValueStore {
     }
 
 
-    pub fn serialize_bitvec(&self, bv: &BitVec<u8, Msb0>) -> String {
-        let mut bytes = Vec::new();
-        for chunk in bv.chunks(8) {
-            let mut byte = 0u8;
-            for (i, bit) in chunk.iter().enumerate() {
-                if *bit {
-                    byte |= 1 << (7 - i);
+    pub fn bit_op(&self, op: &str, dest_key: String, src_keys: Vec<String>) -> Vec<u8> {
+        let op = op.to_uppercase();
+        if src_keys.is_empty() {
+            return encode_error("ERR BITOP must be called with at least one source key");
+        }
+        let mut bitvecs: Vec<BitVec<u8, Msb0>> = Vec::new();
+        let mut max_len_bits = 0;
+
+        for key in &src_keys {
+            if let Some(guard) = self.store.get(key) {
+                let string_value = guard.value();
+                let actual_len_bits = string_value.len() * 8;
+                max_len_bits = std::cmp::max(max_len_bits, actual_len_bits);
+
+                let mut bv = self.deserialize_bitvec(string_value);
+                bv.resize(actual_len_bits, false);
+
+                bitvecs.push(bv);
+            } else {
+                bitvecs.push(BitVec::<u8, Msb0>::new());
+            }
+        }
+        for bv in &mut bitvecs {
+            if bv.len() < max_len_bits {
+                bv.resize(max_len_bits, false);
+            }
+        }
+        let mut result_bv = bitvecs[0].clone();
+
+        match op.as_str() {
+            "AND" => {
+                for bv in bitvecs.iter().skip(1) {
+                    result_bv &= bv;
                 }
             }
-            bytes.push(byte);
+            "OR" => {
+                for bv in bitvecs.iter().skip(1) {
+                    result_bv |= bv;
+                }
+            }
+            _ => return encode_error("ERR syntax error or unknown BITOP operation"),
+        };
+
+        let serialized = self.serialize_bitvec(&result_bv);
+        let result_len_bytes = serialized.len();
+
+        self.store.insert(dest_key, serialized);
+        encode_int(&(result_len_bytes))
+    }
+
+    pub fn serialize_bitvec(&self, bv: &BitVec<u8, Msb0>) -> String {
+        let byte_count = bv.len() / 8;
+        let mut bytes = vec![0u8; byte_count];
+        for (i, bit) in bv.iter().enumerate() {
+            let byte_idx = i / 8;
+            let bit_idx = i % 8;
+            if byte_idx < byte_count && *bit {
+                bytes[byte_idx] |= 1 << (7 - bit_idx);
+            }
         }
         bytes.iter().map(|&b| b as char).collect()
     }
 
-
     pub fn deserialize_bitvec(&self, s: &str) -> BitVec<u8, Msb0> {
         let bytes: Vec<u8> = s.chars().map(|c| c as u8).collect();
-        BitVec::from_vec(bytes)
+        let total_bits = bytes.len() * 8;
+        let mut bv = BitVec::<u8, Msb0>::new();
+        bv.resize(total_bits, false);
+        for (i, &byte) in bytes.iter().enumerate() {
+            for bit_idx in 0..8 {
+                let bit_value = (byte & (1 << (7 - bit_idx))) != 0;
+                bv.set(i * 8 + bit_idx, bit_value);
+            }
+        }
+
+        bv
     }
 
 }
