@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use crate::{encode_str, transactions, AOFSettings, RdbSettings, ReplicaInstance, TXContext};
-use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit};
+use crate::Handler::{LRange, RPush, LPush, Echo, Get, Null, Ping, Set, LLen, LPop, BLPop, Type, XAdd, XRange, XRead, Incr, Multi, Exec, Queued, Discard, Info, ReplConf, PSync, Wait, Config, Keys, Subscribe, Publish, ZAdd, ZRank, ZRange, ZCard, ZScore, ZRem, GeoAdd, GeoPos, GeoDist, GeoSearch, WhoAmi, GetUser, SetUser, AclAuth, Watch, Unwatch, SetBit, GetBit};
 use crate::key_value_store::KV_STORE;
 use crate::stream_store::STREAM_STORE;
 use std::cell::RefCell;
@@ -64,6 +64,7 @@ pub enum Handler<'a> {
     AclAuth(RefCell<&'a mut Auth>, String, String),
     //BitMap
     SetBit(String, String, String),
+    GetBit(String, String),
     Null,
 }
 
@@ -119,6 +120,7 @@ const SETUSER: &str = "SETUSER";
 const AUTH: &str = "AUTH";
 //BitMap
 const SET_BIT: &str = "SETBIT";
+const GET_BIT: &str = "GETBIT";
 
 
 const BLOCK: &str = "block";
@@ -268,7 +270,7 @@ impl Handler<'_> {
                 GeoDist(set_name, place1, place2)
             },
             Some(GEOSEARCH) => {
-                let (set_name, lon, lat, range, unit) =Self::parse_geosearch(&vector).unwrap_or_else(|| (String::new(), 0 as f64,0 as f64,0 as f64,String::new() ));
+                let (set_name, lon, lat, range, unit) =Self::parse_geosearch(&vector).unwrap_or_else(|| (String::new(), 0f64, 0f64, 0f64, String::new() ));
                 GeoSearch(set_name, lon , lat , range , unit)
             },
             Some(ACL) => {
@@ -294,8 +296,12 @@ impl Handler<'_> {
                 AclAuth(RefCell::new(auth), username, password)
             },
             Some(SET_BIT) => {
-                let ( stream_name , start_id , end_id ) = Self::parse_three_args(&vector).unwrap_or_else(|| (String::new(),String::new(),String::new()));
-                SetBit(stream_name, start_id, end_id)
+                let ( key , offset , value ) = Self::parse_three_args(&vector).unwrap_or_else(|| (String::new(),String::new(),String::new()));
+                SetBit(key, offset, value)
+            },
+            Some(GET_BIT) => {
+                let ( key , offset ) = Self::parse_two_args(&vector).unwrap_or_else(|| (String::new(),String::new()));
+                GetBit(key, offset)
             },
             _ => Null,
         }
@@ -319,7 +325,7 @@ impl Handler<'_> {
 
     pub fn process_command(&self) -> Vec<u8> {
         match self {
-            Ping => crate::encode_str("PONG"),
+            Ping => encode_str("PONG"),
             Echo(str) => crate::encode_bulk_str(str),
             Incr(str) => KV_STORE.incr(str.clone()),
             Subscribe(_) =>vec!(),
@@ -364,8 +370,9 @@ impl Handler<'_> {
             GetUser(auth) => AUTH_STORE.get_user(auth.clone()),
             SetUser(auth,username, password) => AUTH_STORE.set_user(auth, username, password),
             AclAuth(auth,username, password) => AUTH_STORE.auth(auth, username, password),
-            SetBit(set_name, start, end) => BITMAP_STORE.set_bit(set_name, start, end),
-            Null => crate::encode_str("Command not recognized"),
+            SetBit(key, offset, value) => KV_STORE.set_bit(key, offset, value),
+            GetBit(key, offset) => KV_STORE.get_bit(key, offset),
+            Null => encode_str("Command not recognized"),
         }
     }
 

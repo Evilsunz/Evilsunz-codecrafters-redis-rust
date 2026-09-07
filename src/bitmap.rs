@@ -51,8 +51,5 @@ impl BitMapStore {
     }
 
 
-    // pub fn getbit(&self, offset: usize) -> bool {
-    //     self.bits.get(offset).map(|bit| *bit).unwrap_or(false)
-    // }
 
 }

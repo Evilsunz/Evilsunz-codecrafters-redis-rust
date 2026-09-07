@@ -1,25 +1,22 @@
-use crate::{encode_bulk_string, encode_error, encode_int, encode_value, encode_vec, encode_vec_as_bulk, RespArrayOfValue, RespBulkString, RespNull};
+use crate::versions::VERSIONS;
+use crate::{encode_bulk_string, encode_error, encode_int, encode_null, encode_value, encode_vec, encode_vec_as_bulk, RespArrayOfValue, RespBulkString, RespNull};
+use dashmap::DashMap;
 use resp::{encode, Value};
-use std::collections::{HashMap};
 use std::convert::TryInto;
-use std::sync::{LazyLock, Mutex, RwLock};
+use std::sync::{LazyLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::{watch};
-use crate::versions::{VERSIONS};
+use tokio::sync::watch;
+use bitvec::prelude::*;
 
 pub static KV_STORE: LazyLock<KeyValueStore> = LazyLock::new(|| KeyValueStore::new());
 
-struct Store {
-    store: HashMap<String, String>,
-    lists: HashMap<String, Vec<String>>,
-    expire: HashMap<String, u128>,
-}
-
 pub struct KeyValueStore {
-    store: RwLock<Store>,
-    notifiers: Mutex<HashMap<String, watch::Sender<Option<String>>>>,
-    versions_sender: UnboundedSender<(String, String)>
+    store: DashMap<String, String>,
+    lists: DashMap<String, Vec<String>>,
+    expire: DashMap<String, u128>,
+    notifiers: DashMap<String, watch::Sender<Option<String>>>,
+    versions_sender: UnboundedSender<(String, String)>,
 }
 
 const EX: &'static str = "EX";
@@ -31,13 +28,11 @@ const ERROR_NOT_INT: &str = "ERR value is not an integer or out of range";
 impl KeyValueStore {
     fn new() -> Self {
         Self {
-            store : RwLock::new(Store {
-                store: HashMap::new(),
-                lists: HashMap::new(),
-                expire: HashMap::new(),
-            }),
-            notifiers: Mutex::new(HashMap::new()),
-            versions_sender : VERSIONS.lock().unwrap().sender()
+            store: DashMap::new(),
+            lists: DashMap::new(),
+            expire: DashMap::new(),
+            notifiers: DashMap::new(),
+            versions_sender: VERSIONS.lock().unwrap().sender(),
         }
     }
 
@@ -49,8 +44,6 @@ impl KeyValueStore {
 
         let mut rx = self
             .notifiers
-            .lock()
-            .unwrap()
             .entry(list_name.clone())
             .or_insert_with(|| watch::channel(None).0)
             .subscribe();
@@ -87,15 +80,17 @@ impl KeyValueStore {
     }
 
     pub fn pop_first(&self, list_name: String, count: Option<u64>) -> Value {
-        let mut guard = self.store.write().unwrap();
-        let lists = &mut guard.lists;
-        let inner_list = match lists.get_mut(&list_name) {
-            Some(list) => list,
+        let mut list_guard = match self.lists.get_mut(&list_name) {
+            Some(guard) => guard,
             None => return RespNull.into(),
         };
+
+        let inner_list = list_guard.value_mut();
+
         if inner_list.is_empty() {
             return RespNull.into();
         }
+
         if let Some(count) = count {
             return self.pop_multiple_elements(inner_list, count);
         }
@@ -106,81 +101,84 @@ impl KeyValueStore {
     fn pop_multiple_elements(&self, list: &mut Vec<String>, count: u64) -> Value {
         let count_usize = count.try_into().unwrap_or(0);
         let items = list.drain(0..count_usize).collect::<Vec<String>>();
-        let values : Vec<Value> = items.iter().map(|v| Value::Bulk(v.clone())).collect();
+        let values: Vec<Value> = items.iter().map(|v| Value::Bulk(v.clone())).collect();
         RespArrayOfValue(values).into()
     }
 
     pub fn len(&self, list_name: String) -> Vec<u8> {
-        let guard = self.store.read().unwrap();
-        let lists = &guard.lists;
-        let inner_list = match lists.get(&list_name) {
-            Some(inner_list) => inner_list,
+        let list_guard = match self.lists.get(&list_name) {
+            Some(guard) => guard,
             None => return encode_int(&0),
         };
-        crate::encode_int(&inner_list.len())
+        let inner_list = list_guard.value();
+        encode_int(&inner_list.len())
     }
 
     pub fn add_to_list(&self, list_name: String, mut values: Vec<String>) -> Vec<u8> {
-        let mut guard = self.store.write().unwrap();
-        let lists = &mut guard.lists;
-        let internal_list = lists
+        let internal_list = self.lists
             .entry(list_name.clone())
             .and_modify(|v| v.append(&mut values))
             .or_insert(values);
         println!("Adding to list: {:?}", internal_list);
-        if let Some(tx) = self.notifiers.lock().unwrap().get(&list_name) {
+        let list_len = internal_list.len();
+        if let Some(tx) = self.notifiers.get(&list_name) {
             println!("Sending notification");
-            println!(" ++++++++ Sending notification to {:?}", tx.receiver_count());
+            println!(
+                " ++++++++ Sending notification to {:?}",
+                tx.receiver_count()
+            );
             let _ = tx.send(Some(String::from("UPD")));
         }
         println!("Done sending notification");
-        encode_int(&internal_list.len())
+
+        encode_int(&list_len)
     }
 
     pub fn add_to_list_left(&self, list_name: String, mut values: Vec<String>) -> Vec<u8> {
-        let mut guard = self.store.write().unwrap();
-        let lists = &mut guard.lists;
         values.reverse();
-        let internal_list = lists
+        let internal_list = self.lists
             .entry(list_name)
             .and_modify(|v| {
                 v.splice(0..0, values.iter().cloned());
             })
             .or_insert(values);
-        crate::encode_int(&internal_list.len())
+        encode_int(&internal_list.len())
     }
 
     pub fn list_range(&self, list_name: String, start: isize, end: isize) -> Vec<u8> {
-        let guard = self.store.read().unwrap();
-        let lists = &guard.lists;
-        let inner_list = match lists.get(&list_name) {
-            Some(inner_list) => inner_list,
+        let list_guard = match self.lists.get(&list_name) {
+            Some(guard) => guard,
             None => return encode_vec(vec![]),
         };
+        let inner_list = list_guard.value();
 
         let slice_indices = self.calculate_slice_indices(start, end, inner_list.len());
         match slice_indices {
-            Some((start_idx, end_idx)) => encode_vec_as_bulk(inner_list[start_idx..=end_idx].to_vec()),
+            Some((start_idx, end_idx)) => {
+                encode_vec_as_bulk(inner_list[start_idx..=end_idx].to_vec())
+            }
             None => encode_vec(vec![]),
         }
     }
 
     pub fn incr(&self, key: String) -> Vec<u8> {
-        let mut guard = self.store.write().unwrap();
-        let int_store = &mut guard.store;
-            if let Some(existing_value) = int_store.get(&key) {
-                match existing_value.parse::<usize>() {
+        use dashmap::Entry;
+        match self.store.entry(key) {
+            Entry::Occupied(mut occupied) => {
+                match occupied.get().parse::<usize>() {
                     Ok(current) => {
                         let new_value = current + 1;
-                        int_store.insert(key, new_value.to_string());
+                        occupied.insert(new_value.to_string());
                         encode_int(&new_value)
                     }
                     Err(_) => encode_error(ERROR_NOT_INT),
                 }
-            } else {
-                int_store.insert(key, String::from("1"));
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(String::from("1"));
                 encode_int(&1)
             }
+        }
     }
 
     pub fn set(
@@ -193,29 +191,30 @@ impl KeyValueStore {
         if let (Some(unit), Some(duration)) = (expire_unit, expire_dur) {
             match self.calculate_expiration_time(&unit, duration) {
                 Ok(expire_time) => {
-                    let mut guard = self.store.write().unwrap();
-                    let expire = &mut guard.expire;
-                    expire.insert(key.clone(), expire_time);
+                    self.expire.insert(key.clone(), expire_time);
                 }
                 Err(err_msg) => {
                     return crate::encode_str(&err_msg);
                 }
             }
         }
-        let mut guard = self.store.write().unwrap();
-        let store = &mut guard.store;
         let key_versions = key.clone();
-        store.insert(key, value);
-        let _ = self.versions_sender.send((STORAGE.to_string(),key_versions));
+        self.store.insert(key, value);
+        let _ = self
+            .versions_sender
+            .send((STORAGE.to_string(), key_versions));
         crate::encode_str(OK)
     }
 
-    pub fn keys(&self) -> Vec<u8>{
-        let guard = self.store.read().unwrap();
-        let result = guard.store.keys().map(|k| k.to_string()).collect::<Vec<String>>();
+    pub fn keys(&self) -> Vec<u8> {
+        let result = self
+            .store
+            .iter()
+            .map(|kv| kv.key().clone())
+            .collect::<Vec<String>>();
         encode_vec_as_bulk(result)
     }
-    
+
     fn calculate_expiration_time(
         &self,
         expire_unit: &str,
@@ -229,34 +228,32 @@ impl KeyValueStore {
 
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .map_err(|e| e.to_string())?
             .as_millis();
 
         Ok(current_time + expire_in_millis)
     }
 
     pub fn type_of(&self, key: &str) -> Option<String> {
-        let guard = self.store.read().unwrap();
-        let store = &guard.store;
-        match store.get(key) {
+        match self.store.get(key) {
             Some(_) => Some("string".to_string()),
             None => None,
         }
     }
 
     pub fn get(&self, key: &str) -> Vec<u8> {
-        let mut guard = self.store.write().unwrap();
-        let Store { store, expire, .. } = &mut *guard;
-        if let Some(&stored_expiration) = expire.get(key) {
-            if self.is_expired(stored_expiration) {
-                expire.remove(key);
-                store.remove(key);
-                return encode(&Value::Null);
-            }
+        let is_expired = self.expire.get(key)
+            .map(|r| self.is_expired(*r))
+            .unwrap_or(false);
+
+        if is_expired {
+            self.expire.remove(key);
+            self.store.remove(key);
+            return encode_null();
         }
-        match store.get(key) {
-            Some(value) => encode_bulk_string(value.to_string()),
-            None => encode(&Value::Null),
+        match self.store.get(key) {
+            Some(guard) => encode_bulk_string(guard.value().to_string()),
+            None => encode_null(),
         }
     }
 
@@ -294,4 +291,63 @@ impl KeyValueStore {
             index
         }
     }
+
+    pub fn set_bit(&self, key: &str, offset: &str, value: &str) -> Vec<u8> {
+        let offset = match offset.parse::<usize>() {
+            Ok(num) => num,
+            Err(_) => return encode_error("Value must be a valid number"),
+        };
+        let bit_value = match value {
+            "1" => true,
+            "0" => false,
+            _ => return encode_error("ERR bit is not an integer or out of range"),
+        };
+
+        let mut guard = self.store.entry(key.to_string()).or_insert_with(|| {
+            self.serialize_bitvec(&BitVec::<u8, Msb0>::new())
+        });
+
+        let mut bv = self.deserialize_bitvec(guard.value());
+        if offset >= bv.len() {
+            bv.resize(offset + 1, false);
+        }
+        let old_bit = bv.replace(offset, bit_value);
+
+        *guard.value_mut() = self.serialize_bitvec(&bv);
+        let old_value = if old_bit { 1 } else { 0 };
+        encode_int(&old_value)
+    }
+
+    pub fn get_bit(&self, key: &str, offset: &str) -> Vec<u8> {
+        let offset = match offset.parse::<usize>() {
+            Ok(num) => num,
+            Err(_) => return encode_error("ERR bit offset is not an integer or out of range"),
+        };
+        match self.store.get(key) {
+            Some(guard) => {
+                let bv = self.deserialize_bitvec(guard.value());
+                let bit_value = if offset < bv.len() {
+                    if *bv.get(offset).unwrap() { 1 } else { 0 }
+                } else {
+                    0
+                };
+                encode_int(&bit_value)
+            }
+            None => {
+                encode_int(&0)
+            }
+        }
+    }
+    
+    pub fn serialize_bitvec(&self, bv: &BitVec<u8, Msb0>) -> String {
+        let bytes = bv.as_raw_slice(); // Получаем &[u8]
+        bytes.iter().map(|&b| b as char).collect()
+    }
+
+
+    pub fn deserialize_bitvec(&self, s: &str) -> BitVec<u8, Msb0> {
+        let bytes: Vec<u8> = s.chars().map(|c| c as u8).collect();
+        BitVec::from_vec(bytes)
+    }
+
 }
